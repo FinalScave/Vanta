@@ -1,0 +1,9 @@
+/build/
+.cache
+.idea
+.vanta
+.DS_Store
+compile_commands.json
+cmake-build**
+.codex
+.claude

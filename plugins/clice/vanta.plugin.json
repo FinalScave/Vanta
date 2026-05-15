@@ -1,0 +1,20 @@
+{
+  "id": "vanta.clice",
+  "name": "clice Language Intelligence",
+  "version": "0.1.0",
+  "publisher": "Vanta",
+  "runtime": {
+    "kind": "core",
+    "entry": "builtin:clice"
+  },
+  "activationEvents": [
+    "onLanguage:cpp",
+    "onWorkspaceContains:compile_commands.json"
+  ],
+  "permissions": [
+    "workspace.read",
+    "process.execute",
+    "language.service",
+    "agent.tool"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "vanta.cmake",
+  "name": "CMake Support",
+  "version": "0.1.0",
+  "publisher": "Vanta",
+  "runtime": {
+    "kind": "core",
+    "entry": "builtin:cmake"
+  },
+  "activationEvents": [
+    "onWorkspaceContains:CMakeLists.txt"
+  ],
+  "permissions": [
+    "workspace.read",
+    "process.execute",
+    "build.provider",
+    "agent.tool"
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "vanta.languages",
+  "name": "Core Languages",
+  "version": "0.1.0",
+  "publisher": "Vanta",
+  "runtime": {
+    "kind": "core",
+    "entry": "builtin:languages"
+  },
+  "activationEvents": [
+    "onStartup"
+  ],
+  "permissions": [
+    "language.service"
+  ]
+}

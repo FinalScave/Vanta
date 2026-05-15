@@ -1,0 +1,20 @@
+{
+  "id": "vanta.git",
+  "name": "Git Support",
+  "version": "0.1.0",
+  "publisher": "Vanta",
+  "runtime": {
+    "kind": "core",
+    "entry": "builtin:git"
+  },
+  "activationEvents": [
+    "onWorkspaceContains:.git"
+  ],
+  "permissions": [
+    "workspace.read",
+    "workspace.write",
+    "git.read",
+    "git.write",
+    "agent.tool"
+  ]
+}
