@@ -11,9 +11,5 @@
     "onLanguage:python",
     "onWorkspaceContains:pyproject.toml",
     "onWorkspaceContains:requirements.txt"
-  ],
-  "permissions": [
-    "workspace.read",
-    "process.execute"
   ]
 }

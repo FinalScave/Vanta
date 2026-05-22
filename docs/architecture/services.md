@@ -9,6 +9,12 @@ instances. Plugins, components, providers, agents, and UI projections should
 receive `WorkspaceContext&` and depend on service interfaces, not concrete
 runtime implementations.
 
+`WorkspaceContext` is also the unified service container. Stable core services
+remain available through explicit getters such as `Build()` and `Commands()`,
+while optional host services use `GetService<T>()` with each service's
+`kServiceId`. The Qt IDE registers `UiService` in the same container before
+plugin activation; the CLI does not register UI services.
+
 ## Workspace Core
 
 Core workspace services are available from `WorkspaceContext` and are not tied
@@ -27,7 +33,6 @@ to a specific language, build system, or UI.
   custom index lookups.
 - `CapabilityRegistry` owns readiness and capability state derived from runtime
   services.
-- `WorkspaceInitializationPipeline` owns startup and project refresh stages.
 - `SettingsService` owns typed setting definitions, scoped values, search, and
   effective value resolution.
 - `ChangeSetService` owns proposed workspace edits, approval status, preflight
@@ -44,8 +49,8 @@ than a raw file tree.
 - `ProjectManager` owns project model providers, current project-model refresh,
   project view providers, and project structure views such as Files, CMake,
   Android, packages, scratch files, and generated files.
-- `ProjectModelProvider` contributes project facets, modules, roots,
-  attachments, and summaries.
+- `ProjectModelProvider` contributes project facets, modules, roots, and
+  attachments with provider-owned data.
 - `ProjectViewProvider` contributes one or more project views and answers
   `TopLevelNodes` and `Children` queries. Providers own complete views rather
   than merging nodes into another provider's tree.
@@ -85,7 +90,8 @@ Build, execution, and jobs are related but separate.
 - `BuildService` owns build provider detection and converts build or test intent
   into a `BuildPlan`. It delegates process execution to `ExecutionService` and
   reports progress through `JobService`.
-- `RunConfigurationRegistry` owns run configuration types and producers.
+- `RunConfigurationService` owns run configuration providers, manual creation,
+  discovery, and run dispatch for project-persisted or temporary configurations.
 - `ProjectRunConfigurations` owns persisted run configurations as project state.
 
 This separation lets a remote executor, local process runner, ADB device, or
@@ -97,15 +103,14 @@ Agent APIs should remain auditable and should not mutate the workspace without a
 `ChangeSet`.
 
 - `AgentContextCollector` gathers structured context for model prompts.
-- `AgentToolRegistry` exposes dynamic tools for model tool calls.
+- `AgentToolRegistry` exposes dynamic plugin tools for model tool calls.
 - `AgentOperationService` owns the structured operation protocol for auditable
-  IDE mutations.
-- `AgentOperationJournal` records operation input summaries, events, results,
-  and change sets.
+  IDE mutations and records operation input summaries, events, results, and
+  change sets.
 - `ModelService` owns model provider registration, model discovery, completion,
   and streaming callbacks.
-- `AgentRuntime` owns interactive agent sessions and bridges context collection,
-  model calls, plan events, and agent operation calls.
+- `AgentRuntime` owns interactive agent sessions, injects collected IDE context
+  into model requests, and exposes core IDE operations as auditable model tools.
 - Agent writes should create `ChangeSet` values and rely on approval before
   apply.
 - Long-lived IDE operations should prefer `AgentOperationService` over raw tool
@@ -117,13 +122,14 @@ Agent APIs should remain auditable and should not mutate the workspace without a
 IDE service.
 
 - `ExtensionContext` exposes extension info, workspace info, logger,
-  permissions, lifecycle tracking, component contribution, and
-  `workspaceContext()`.
-- Plugins access IDE capabilities through `WorkspaceContext`.
-- Runtime contribution metadata is exposed as DTO snapshots, not as a mutable
-  registry service.
+  plugin-private storage, lifecycle tracking, and `WorkspaceContext`.
+- Plugins access IDE capabilities through `WorkspaceContext`; optional host
+  services are discovered through `WorkspaceContext::GetService<T>()` or the
+  convenience forwarding on `ExtensionContext`.
+- Runtime plugin capability metadata is not stored as a parallel registry.
+  Plugins register directly into the target service.
 - Plugin APIs should depend on service interfaces such as `BuildService`,
-  `LanguageRegistry`, `CommandRegistry`, `RunConfigurationRegistry`, and
+  `LanguageRegistry`, `CommandRegistry`, `RunConfigurationService`, and
   `GitService`.
 - Default implementations live in `vanta::internal` and are owned by
   `WorkspaceRuntime`.
@@ -137,10 +143,12 @@ IDE service.
   file presence, language availability, and command availability.
 - Plugin manifests declare `minApiVersion`, optional `targetApiVersion`, and
   capabilities.
-- Process plugins return `PluginRegistration` values during activation. Vanta
-  stores those registrations as runtime contribution metadata and bridges
-  supported registrations into commands, agent tools, build providers, model
-  providers, debug providers, and language services.
+- Plugin manifests do not declare security permissions. Sensitive actions are
+  mediated by `ApprovalService` and workspace trust at the operation boundary.
+- Process plugins return capability registration values during activation only
+  for capabilities that Vanta currently bridges into runtime services:
+  commands, agent tools, build providers, model providers, debug providers, and
+  language services.
 - Hot unload must explicitly release registrations tracked by plugin activation
   state.
 
@@ -168,11 +176,11 @@ depend on one built-in implementation directly.
 
 - Built-in plugin packages live under `plugins/builtin/vanta.*` with their
   manifests, resources, and implementation sources.
-- `src/plugin` contains plugin infrastructure only, such as lifecycle,
-  manifests, permissions, contribution tracking, and process hosting.
+- `src/core/plugin` contains plugin infrastructure only, such as lifecycle,
+  manifests, capability registration, and process hosting.
 - CMake is a build and project-model provider that produces `BuildPlan` steps.
 - C++ and Python single-file run support and project templates are built-in
-  plugin contributions, not core platform behavior.
+  plugin-provided capabilities, not core platform behavior.
 - clice is a C++ language and index integration.
 - Git is exposed through `GitService`; the command-backed implementation is
   platform-owned, while the built-in Git extension contributes commands and
@@ -184,6 +192,13 @@ depend on one built-in implementation directly.
 UI code should prefer stable query APIs and event streams rather than reaching
 into implementation details.
 
+`include/vanta/ide` is the public API surface for IDE/UI clients and in-process
+UI extensions. `UiService` is an optional host service registered by the IDE and
+looked up through `WorkspaceContext`. UI providers register panels, actions, and
+settings pages with `RegistrationHandle`, matching core extension-point
+lifecycles, but they must not force core services or third-party process plugins
+to depend on a specific UI toolkit.
+
 UI session state is owned by UI clients, not by `WorkspaceRuntime`.
 `UiStateStore` instances belong to the IDE/UI layer, subscribe to core events,
 and project workspace state together with client-owned tabs, keybindings, and
@@ -191,7 +206,7 @@ palette state. The CLI uses `WorkspaceRuntime` directly and does not depend on
 UI state. Different frontends can keep their own view state, such as panel sizes
 or scroll positions, without pushing pixel-level details into core.
 
-- Background UI should read `JobService` and `WorkspaceInitializationPipeline`.
+- Background UI should read `JobService`.
 - Readiness UI should read `CapabilityRegistry`.
 - Settings UI should read `SettingsService` nodes, definitions, scope
   descriptors, and search results without depending on a fixed UI layout.
@@ -199,7 +214,7 @@ or scroll positions, without pushing pixel-level details into core.
 - Project/explorer UI should read `ProjectManager::Views`, `TopLevelNodes`, and
   `Children`; UI-owned expansion, selection, scroll, and panel dimensions stay
   outside core.
-- Agent timeline UI should read `AgentOperationJournal`.
+- Agent timeline UI should read `AgentOperationService` operation records.
 - Agent session UI should read `AgentRuntime`.
 - Diff and approval UI should read `ChangeSetService`.
 - Debug UI should read `DebugService`.

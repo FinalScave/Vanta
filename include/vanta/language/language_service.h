@@ -1,16 +1,16 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
-#include <filesystem>
-#include <optional>
 #include <string>
 #include <vector>
 
 #include "vanta/core/diagnostic.h"
-#include "vanta/workspace/document_service.h"
 #include "vanta/core/registration.h"
 #include "vanta/core/text.h"
-#include "vanta/core/value.h"
+#include "vanta/language/code_model.h"
+#include "vanta/workspace/document_service.h"
+#include "vanta/workspace/workspace_edit.h"
 
 namespace vanta {
 
@@ -102,11 +102,6 @@ struct HoverResult {
     LanguageRequestTrace trace;
 };
 
-struct Location {
-    VirtualFile file;
-    TextRange range;
-};
-
 struct LocationResult {
     bool ok = false;
     std::string error;
@@ -118,6 +113,101 @@ struct SemanticTokens {
     bool ok = false;
     std::string error;
     std::vector<std::int64_t> data;
+    LanguageRequestTrace trace;
+};
+
+struct ReferenceRequest {
+    TextDocumentPosition position;
+    bool include_declaration = false;
+};
+
+struct ReferenceResult {
+    bool ok = false;
+    std::string error;
+    std::vector<SymbolReference> references;
+    LanguageRequestTrace trace;
+};
+
+struct DocumentSymbolResult {
+    bool ok = false;
+    std::string error;
+    std::vector<CodeSymbol> symbols;
+    LanguageRequestTrace trace;
+};
+
+struct RenamePrepareResult {
+    bool ok = false;
+    std::string error;
+    TextRange range;
+    std::string placeholder;
+    LanguageRequestTrace trace;
+};
+
+enum class CodeActionKind {
+    QuickFix,
+    Refactor,
+    RefactorExtract,
+    RefactorInline,
+    RefactorRewrite,
+    Source,
+    SourceOrganizeImports,
+    SourceFixAll,
+};
+
+struct CodeAction {
+    std::string id;
+    std::string title;
+    CodeActionKind kind = CodeActionKind::QuickFix;
+    std::vector<Diagnostic> diagnostics;
+    WorkspaceEdit edit;
+    std::string command_id;
+    bool preferred = false;
+};
+
+struct CodeActionRequest {
+    TextDocumentIdentifier document;
+    TextRange range;
+    std::vector<Diagnostic> diagnostics;
+    std::vector<CodeActionKind> only;
+};
+
+struct CodeActionResult {
+    bool ok = false;
+    std::string error;
+    std::vector<CodeAction> actions;
+    LanguageRequestTrace trace;
+};
+
+struct CallHierarchyCall {
+    CodeSymbol item;
+    std::vector<TextRange> ranges;
+};
+
+struct CallHierarchyPrepareResult {
+    bool ok = false;
+    std::string error;
+    std::vector<CodeSymbol> items;
+    LanguageRequestTrace trace;
+};
+
+struct CallHierarchyResult {
+    bool ok = false;
+    std::string error;
+    std::vector<CallHierarchyCall> calls;
+    LanguageRequestTrace trace;
+};
+
+struct TypeHierarchyPrepareResult {
+    bool ok = false;
+    std::string error;
+    std::vector<CodeSymbol> items;
+    LanguageRequestTrace trace;
+};
+
+struct TypeHierarchyResult {
+    bool ok = false;
+    std::string error;
+    std::vector<CodeSymbol> items;
     LanguageRequestTrace trace;
 };
 
@@ -138,10 +228,23 @@ public:
     virtual HoverResult Hover(const TextDocumentPosition& request) = 0;
     virtual LocationResult Definition(const TextDocumentPosition& request) = 0;
     virtual SemanticTokens SemanticTokensFull(const TextDocumentIdentifier& document) = 0;
+    virtual ReferenceResult References(const ReferenceRequest& request);
+    virtual LocationResult Implementation(const TextDocumentPosition& request);
+    virtual DocumentSymbolResult DocumentSymbols(const TextDocumentIdentifier& document);
+    virtual RenamePrepareResult PrepareRename(const TextDocumentPosition& request);
+    virtual CodeActionResult CodeActions(const CodeActionRequest& request);
+    virtual CallHierarchyPrepareResult PrepareCallHierarchy(const TextDocumentPosition& request);
+    virtual CallHierarchyResult IncomingCalls(const CodeSymbol& item);
+    virtual CallHierarchyResult OutgoingCalls(const CodeSymbol& item);
+    virtual TypeHierarchyPrepareResult PrepareTypeHierarchy(const TextDocumentPosition& request);
+    virtual TypeHierarchyResult Supertypes(const CodeSymbol& item);
+    virtual TypeHierarchyResult Subtypes(const CodeSymbol& item);
 };
 
 class LanguageRegistry {
 public:
+    static constexpr const char* kServiceId = "vanta.languages";
+
     virtual ~LanguageRegistry() = default;
 
     virtual RegistrationHandle RegisterLanguage(Language language) = 0;
@@ -161,5 +264,6 @@ public:
 
 std::vector<Language> DefaultLanguages();
 void RegisterDefaultLanguages(LanguageRegistry& languages);
+std::string ToString(CodeActionKind kind);
 
 }

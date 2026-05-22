@@ -9,8 +9,7 @@ void TestCodeIntelligenceStaleRequest() {
     WriteFile(root / "main.cpp", "int main() { return 0; }\n");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
 
@@ -141,8 +140,7 @@ void TestCodeIntelligenceService() {
     WriteFile(root / "main.cpp", "int main() { return 0; }\n");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     const vanta::VirtualFile main_file = session.Context().CurrentWorkspace().File("main.cpp");
@@ -179,6 +177,41 @@ void TestCodeIntelligenceService() {
     session.Close();
 }
 
+void TestLanguageSemanticApis() {
+    const auto root = MakeTempRoot();
+    WriteFile(root / "main.cpp", "int main() { return 0; }\n");
+
+    vanta::VirtualFileSystem vfs;
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
+    std::string error;
+    REQUIRE(session.Open(root, &error));
+    const vanta::VirtualFile main_file = session.Context().CurrentWorkspace().File("main.cpp");
+    vanta::TextDocument* document = session.Context().Documents().OpenDocument(main_file, &error);
+    REQUIRE(document != nullptr);
+    auto service = std::make_unique<FakeLanguageService>();
+    session.Context().Languages().RegisterLanguage(FakeCppLanguage(service.get()));
+
+    vanta::TextDocumentPosition position;
+    position.document.file = main_file;
+    position.document.language_id = "cpp";
+    position.position = {.line = 0, .character = 4};
+
+    const vanta::ReferenceResult references = service->References({
+        .position = position,
+    });
+    REQUIRE(references.ok);
+    REQUIRE(references.references.size() == 1);
+
+    const vanta::DocumentSymbolResult symbols = service->DocumentSymbols(position.document);
+    REQUIRE(symbols.ok);
+    REQUIRE(symbols.symbols.front().kind == vanta::SymbolKind::Function);
+
+    const vanta::RenamePrepareResult rename = service->PrepareRename(position);
+    REQUIRE(rename.ok);
+    REQUIRE(rename.placeholder == "main");
+    session.Close();
+}
+
 void TestCliceRegistersLanguageService() {
     const auto root = MakeTempRoot();
     WriteFile(root / "plugins" / "clice" / "vanta.plugin.json", R"({
@@ -186,13 +219,11 @@ void TestCliceRegistersLanguageService() {
       "name": "clice Language Intelligence",
       "version": "0.1.0",
       "publisher": "Vanta",
-      "runtime": {"kind": "core", "entry": "builtin:clice"},
-      "permissions": ["process.execute", "language.service", "agent.tool"]
+      "runtime": {"kind": "core", "entry": "builtin:clice"}
     })");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     vanta::ConsoleLogger logger;
@@ -228,6 +259,10 @@ TEST_CASE("Language registry project context resolution", "[language]") {
 
 TEST_CASE("Code intelligence service", "[language]") {
     vanta::tests::TestCodeIntelligenceService();
+}
+
+TEST_CASE("Language semantic APIs", "[language]") {
+    vanta::tests::TestLanguageSemanticApis();
 }
 
 TEST_CASE("Clice registers language service", "[language][clice]") {

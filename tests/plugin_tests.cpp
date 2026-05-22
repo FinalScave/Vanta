@@ -11,15 +11,11 @@ void TestPluginComponentRegistrationLifecycle() {
       "name": "Sample Component",
       "version": "0.1.0",
       "publisher": "Vanta",
-      "runtime": {"kind": "core", "entry": "builtin:sample-component"},
-      "contributes": {
-        "components": [{"id": "sample.runtime", "title": "Sample Runtime"}]
-      }
+      "runtime": {"kind": "core", "entry": "builtin:sample-component"}
     })");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
 
@@ -36,7 +32,6 @@ void TestPluginComponentRegistrationLifecycle() {
     auto lifecycle = manager.PluginLifecycle();
     REQUIRE(lifecycle.size() == 1);
     REQUIRE(lifecycle[0].state == vanta::PluginLifecycleState::Discovered);
-    REQUIRE(session.Context().Contributions(vanta::PluginRegistrationKind::Component).empty());
     const auto messages = manager.ActivateCorePlugins(
         registry,
         logger,
@@ -70,6 +65,42 @@ void TestPluginComponentRegistrationLifecycle() {
     session.Close();
 }
 
+void TestPluginComponentProviderBeforeProjectAttach() {
+    const auto root = MakeTempRoot();
+    WriteFile(root / "plugins" / "sample" / "vanta.plugin.json", R"({
+      "id": "sample.component.plugin",
+      "name": "Sample Component",
+      "version": "0.1.0",
+      "publisher": "Vanta",
+      "runtime": {"kind": "core", "entry": "builtin:sample-component"}
+    })");
+
+    vanta::VirtualFileSystem vfs;
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
+    std::string error;
+    REQUIRE(session.Open(root, &error, false));
+
+    ComponentTestStats stats;
+    vanta::PluginManager manager;
+    vanta::CorePluginRegistry registry;
+    registry.Add("builtin:sample-component", [&stats] {
+        return std::make_unique<RuntimeComponentExtension>(stats);
+    });
+
+    vanta::ConsoleLogger logger;
+    manager.Scan(root / "plugins");
+    const auto messages = manager.ActivateCorePlugins(registry, logger, session.Context());
+    REQUIRE(messages.size() == 1);
+    REQUIRE(session.Context().RequireProject().GetComponent("sample.runtime") == nullptr);
+    REQUIRE(stats.attached == 0);
+
+    session.InitializeWorkspace();
+    REQUIRE(session.Context().RequireProject().GetComponent("sample.runtime") != nullptr);
+    REQUIRE(stats.attached == 1);
+    manager.DeactivateAll();
+    session.Close();
+}
+
 void TestPluginManifest() {
     const auto root = MakeTempRoot();
     const auto plugin_dir = root / "plugins" / "sample";
@@ -79,19 +110,14 @@ void TestPluginManifest() {
       "version": "0.1.0",
       "publisher": "Vanta",
       "runtime": {"kind": "core", "entry": "builtin:sample"},
-      "permissions": ["workspace.read"],
       "activationEvents": ["onWorkspaceOpened"],
       "contributes": {
         "commands": [{"id": "sample.run", "title": "Sample: Run"}],
-        "views": [{"id": "sample.view", "title": "Sample View"}],
-        "menus": [{"id": "sample.menu", "title": "Sample Menu"}],
         "languageServices": [{"id": "sample.cpp", "title": "Sample C++"}],
-        "fileSystemProviders": [{"id": "sample.fs", "title": "Sample FS"}],
         "agentTools": [{"id": "sample.tool", "title": "Sample Tool"}],
-        "agentContextProviders": [{"id": "sample.context", "title": "Sample Context"}],
-        "runConfigurations": [{"id": "sample.runConfiguration", "title": "Sample Run Configuration"}],
-        "diagnosticProviders": [{"id": "sample.diagnostics", "title": "Sample Diagnostics"}],
-        "components": [{"id": "sample.cache", "title": "Sample Cache"}]
+        "buildProviders": [{"id": "sample.build", "title": "Sample Build"}],
+        "modelProviders": [{"id": "sample.model", "title": "Sample Model"}],
+        "debugProviders": [{"id": "sample.debug", "title": "Sample Debug"}]
       }
     })");
 
@@ -99,7 +125,6 @@ void TestPluginManifest() {
     const auto manifests = manager.Scan(root / "plugins");
     REQUIRE(manifests.size() == 1);
     REQUIRE(manifests[0].extension.id == "sample.plugin");
-    REQUIRE(manifests[0].permissions.size() == 1);
     REQUIRE(manifests[0].activation_events.size() == 1);
 }
 
@@ -126,8 +151,7 @@ void TestPluginCompatibilityChecks() {
     })");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     vanta::ConsoleLogger logger;
@@ -153,8 +177,7 @@ void TestCorePluginActivation() {
       "name": "CMake Support",
       "version": "0.1.0",
       "publisher": "Vanta",
-      "runtime": {"kind": "core", "entry": "builtin:cmake"},
-      "permissions": ["process.execute", "build.provider", "agent.tool"]
+      "runtime": {"kind": "core", "entry": "builtin:cmake"}
     })");
     WriteFile(root / "plugins" / "cmake" / "i18n" / "en-US.properties", R"(
 command.detect.title=Detect CMake
@@ -166,8 +189,7 @@ command.detect.progress=正在检测 {}
 )");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     vanta::ConsoleLogger logger;
@@ -217,8 +239,7 @@ void TestExternalPluginUnloadAndReload() {
       "version": "0.1.0",
       "publisher": "Vanta",
       "runtime": {"kind": "process", "entry": "host.py"},
-      "capabilities": ["command", "modelProvider", "debugProvider"],
-      "permissions": ["workspace.read"]
+      "capabilities": ["command", "modelProvider", "debugProvider"]
     })");
     WriteFile(plugin_dir / "host.py", R"PY(#!/usr/bin/env python3
 import json
@@ -295,15 +316,13 @@ while True:
       "version": "0.1.0",
       "publisher": "Vanta",
       "runtime": {"kind": "process", "entry": "host.py"},
-      "activationEvents": ["onWorkspaceContains:missing.activation.file"],
-      "permissions": ["workspace.read"]
+      "activationEvents": ["onWorkspaceContains:missing.activation.file"]
     })");
     WriteFile(inactive_dir / "host.py", "#!/usr/bin/env python3\n");
     std::filesystem::permissions(inactive_dir / "host.py", std::filesystem::perms::owner_exec, std::filesystem::perm_options::add);
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     vanta::ConsoleLogger logger;
@@ -321,7 +340,7 @@ while True:
     REQUIRE(active != lifecycle.end());
     REQUIRE(active->state == vanta::PluginLifecycleState::Active);
     REQUIRE(active->unloadable);
-    REQUIRE(active->registration_count == 6);
+    REQUIRE(active->registration_count == 3);
     REQUIRE(active->process_running);
     const auto command_result = session.Context().Commands().Execute("external.echo", vanta::Value::ObjectValue({{"value", vanta::Value("ok")}}));
     REQUIRE(command_result.has_value());
@@ -372,8 +391,7 @@ void TestExternalPluginProcessHealth() {
       "version": "0.1.0",
       "publisher": "Vanta",
       "runtime": {"kind": "process", "entry": "host.py"},
-      "capabilities": ["command"],
-      "permissions": ["workspace.read"]
+      "capabilities": ["command"]
     })");
     WriteFile(plugin_dir / "host.py", R"PY(#!/usr/bin/env python3
 import json
@@ -405,8 +423,7 @@ if request is not None:
     std::filesystem::permissions(plugin_dir / "host.py", std::filesystem::perms::owner_exec, std::filesystem::perm_options::add);
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     vanta::ConsoleLogger logger;
@@ -452,60 +469,59 @@ void TestPluginProtocol() {
     REQUIRE(result);
     REQUIRE(result.Value()["ok"].AsBool());
 
-    const auto parsed = vanta::ParsePluginRegistration(vanta::Value::ObjectValue({
+    const auto parsed = vanta::ParsePluginCapabilityRegistration(vanta::Value::ObjectValue({
         {"kind", vanta::Value("agentTool")},
         {"id", vanta::Value("sample.tool")},
         {"title", vanta::Value("Sample Tool")},
         {"metadata", vanta::Value::ObjectValue()},
     }));
     REQUIRE(parsed.has_value());
-    REQUIRE(parsed->kind == vanta::PluginRegistrationKind::AgentTool);
+    REQUIRE(parsed->kind == vanta::PluginCapabilityKind::AgentTool);
 
-    const auto model_registration = vanta::ParsePluginRegistration(vanta::Value::ObjectValue({
+    const auto model_registration = vanta::ParsePluginCapabilityRegistration(vanta::Value::ObjectValue({
         {"kind", vanta::Value("modelProvider")},
         {"id", vanta::Value("sample.model")},
     }));
     REQUIRE(model_registration.has_value());
-    REQUIRE(model_registration->kind == vanta::PluginRegistrationKind::ModelProvider);
+    REQUIRE(model_registration->kind == vanta::PluginCapabilityKind::ModelProvider);
     REQUIRE(vanta::ToString(model_registration->kind) == "modelProvider");
 
-    const auto debug_registration = vanta::ParsePluginRegistration(vanta::Value::ObjectValue({
+    const auto debug_registration = vanta::ParsePluginCapabilityRegistration(vanta::Value::ObjectValue({
         {"kind", vanta::Value("debugProvider")},
         {"id", vanta::Value("sample.debug")},
     }));
     REQUIRE(debug_registration.has_value());
-    REQUIRE(debug_registration->kind == vanta::PluginRegistrationKind::DebugProvider);
+    REQUIRE(debug_registration->kind == vanta::PluginCapabilityKind::DebugProvider);
     REQUIRE(vanta::ToString(debug_registration->kind) == "debugProvider");
 }
 
 void TestRuntimeApproval() {
-    vanta::ApprovalService approvals;
+    vanta::WorkspaceTrustService trust;
+    vanta::ApprovalService approvals(trust);
     approvals.SetAutoApprove(false);
     const auto decision = approvals.RequestApproval({
-        .subject = "sample.plugin",
-        .permission = vanta::Permission::WorkspaceWrite,
+        .actor = {.kind = vanta::ApprovalActorKind::Plugin, .id = "sample.plugin"},
+        .access = vanta::AccessKind::WorkspaceWrite,
         .action = "write file",
         .high_risk = true,
     });
     REQUIRE(decision == vanta::ApprovalDecision::Deny);
     REQUIRE(approvals.History().size() == 1);
 
-    vanta::WorkspaceTrustService trust;
-    approvals.SetWorkspaceTrust(&trust);
     approvals.SetAutoApprove(true);
     trust.SetLevel(vanta::WorkspaceTrustLevel::Untrusted);
     const auto blocked = approvals.RequestApproval({
-        .subject = "sample.plugin",
-        .permission = vanta::Permission::ProcessExecute,
+        .actor = {.kind = vanta::ApprovalActorKind::Plugin, .id = "sample.plugin"},
+        .access = vanta::AccessKind::ProcessExecute,
         .action = "run command",
         .high_risk = true,
     });
     REQUIRE(blocked == vanta::ApprovalDecision::Deny);
-    REQUIRE(!trust.Allows(vanta::Permission::ProcessExecute, true));
+    REQUIRE(!trust.Allows(vanta::AccessKind::ProcessExecute, true));
     trust.SetLevel(vanta::WorkspaceTrustLevel::Trusted);
     const auto allowed = approvals.RequestApproval({
-        .subject = "sample.plugin",
-        .permission = vanta::Permission::ProcessExecute,
+        .actor = {.kind = vanta::ApprovalActorKind::Plugin, .id = "sample.plugin"},
+        .access = vanta::AccessKind::ProcessExecute,
         .action = "run command",
         .high_risk = true,
     });
@@ -530,6 +546,10 @@ void TestNativePluginAbiShape() {
 
 TEST_CASE("Plugin component registration lifecycle", "[plugin][project]") {
     vanta::tests::TestPluginComponentRegistrationLifecycle();
+}
+
+TEST_CASE("Plugin component provider before project attach", "[plugin][project]") {
+    vanta::tests::TestPluginComponentProviderBeforeProjectAttach();
 }
 
 TEST_CASE("Plugin manifest", "[plugin]") {

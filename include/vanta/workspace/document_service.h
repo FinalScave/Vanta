@@ -43,6 +43,8 @@ struct DocumentChangeEvent {
 
 class DocumentService {
 public:
+    static constexpr const char* kServiceId = "vanta.documents";
+
     TextDocument* OpenDocument(const VirtualFile& file, std::string* error_message = nullptr);
     bool CloseDocument(const VirtualFile& file);
     const TextDocument* Document(const VirtualFile& file) const;

@@ -28,7 +28,6 @@ struct PluginManifest {
     std::string min_api_version;
     std::string target_api_version;
     std::vector<std::string> capabilities;
-    std::vector<std::string> permissions;
     std::vector<std::string> activation_events;
 };
 
@@ -77,7 +76,6 @@ public:
     BasicExtensionContext(
         ExtensionInfo extension,
         std::shared_ptr<PluginActivationState> activation_state,
-        PermissionSet permissions,
         Logger& logger,
         WorkspaceContext& workspace);
 
@@ -86,14 +84,12 @@ public:
     Logger& Log() override;
     WorkspaceContext& Context() override;
     Localizer LocalizerValue() const override;
-    const PermissionSet& Permissions() const override;
+    PluginStorageService& Storage() override;
     void Track(RegistrationHandle registration) override;
-    void ContributeComponent(ComponentContribution contribution) override;
 
 private:
     ExtensionInfo extension_;
     std::shared_ptr<PluginActivationState> activation_state_;
-    PermissionSet permissions_;
     Logger& logger_;
     WorkspaceContext& workspace_;
 };

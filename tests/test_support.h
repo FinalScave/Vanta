@@ -32,12 +32,14 @@
 #include "vanta/plugin/core_plugin.h"
 #include "vanta/plugin/plugin_protocol.h"
 #include "vanta/plugin/plugin_manager.h"
+#include "vanta/platform/async.h"
+#include "vanta/platform/async_job_dispatcher.h"
 #include "vanta/platform/process.h"
 #include "vanta/core/json_codec.h"
 #include "vanta/core/result.h"
-#include "vanta/project/project_manager.h"
+#include "vanta/project/project.h"
 #include "project/project_state_store.h"
-#include "vanta/plugin/approval_service.h"
+#include "vanta/workspace/approval_service.h"
 #include "ui/command_palette.h"
 #include "ui/layout_state_store.h"
 #include "ui/ui_state_store.h"
@@ -48,6 +50,14 @@
 
 
 namespace vanta::tests {
+
+inline void WaitForJobs(vanta::WorkspaceContext& context, vanta::JobKind kind) {
+    for (const vanta::JobRecord& job : context.Jobs().Jobs()) {
+        if (job.kind == kind) {
+            context.Jobs().Wait(job.id);
+        }
+    }
+}
 
 class FakeLanguageService final : public vanta::LanguageService {
 public:
@@ -79,6 +89,55 @@ public:
     }
     vanta::SemanticTokens SemanticTokensFull(const vanta::TextDocumentIdentifier&) override {
         return {.ok = true, .trace = {.method = "semantic_tokens/full"}};
+    }
+    vanta::ReferenceResult References(const vanta::ReferenceRequest& request) override {
+        return {
+            .ok = true,
+            .references = {{
+                .symbol_id = "main",
+                .name = "main",
+                .location = {
+                    .file = request.position.document.file,
+                    .range = {
+                        .start = {.line = 0, .character = 4},
+                        .end = {.line = 0, .character = 8},
+                    },
+                },
+                .kind = vanta::SymbolReferenceKind::Definition,
+            }},
+            .trace = {.method = "references"},
+        };
+    }
+    vanta::DocumentSymbolResult DocumentSymbols(const vanta::TextDocumentIdentifier& document) override {
+        return {
+            .ok = true,
+            .symbols = {{
+                .id = "main",
+                .name = "main",
+                .qualified_name = "main",
+                .kind = vanta::SymbolKind::Function,
+                .location = {
+                    .file = document.file,
+                    .range = {
+                        .start = {.line = 0, .character = 4},
+                        .end = {.line = 0, .character = 8},
+                    },
+                },
+                .language_id = document.language_id,
+            }},
+            .trace = {.method = "document_symbols"},
+        };
+    }
+    vanta::RenamePrepareResult PrepareRename(const vanta::TextDocumentPosition&) override {
+        return {
+            .ok = true,
+            .range = {
+                .start = {.line = 0, .character = 4},
+                .end = {.line = 0, .character = 8},
+            },
+            .placeholder = "main",
+            .trace = {.method = "prepare_rename"},
+        };
     }
 
     int opened = 0;
@@ -242,8 +301,8 @@ public:
             .content = "Use tool",
             .tool_calls = {{
                 .id = "call-1",
-                .tool_id = "test.echo",
-                .input = vanta::Value(vanta::Value::ObjectValue({{"value", vanta::Value("ok")}})),
+                .tool_id = "vanta.readFile",
+                .input = vanta::Value(vanta::Value::ObjectValue({{"file", vanta::Value("main.cpp")}})),
             }},
             .payload = vanta::Value::ObjectValue({{"tool", vanta::Value(true)}}),
         };
@@ -394,24 +453,20 @@ public:
     explicit RuntimeComponentExtension(ComponentTestStats& stats) : stats_(stats) {}
 
     void Activate(vanta::ExtensionContext& context) override {
-        context.ContributeComponent({
+        context.Track(context.Context().Projects().RegisterComponentProvider({
             .id = "sample.runtime",
-            .title = "Sample Runtime",
-            .plugin_id = context.Extension().id,
             .match = {.all_projects = true},
             .factory = [this] {
                 return std::make_unique<TestComponent>("sample.runtime", stats_);
             },
-        });
-        context.ContributeComponent({
+        }));
+        context.Track(context.Context().Projects().RegisterComponentProvider({
             .id = "sample.cpp.only",
-            .title = "Sample C++ Only",
-            .plugin_id = context.Extension().id,
             .match = {.facets = {"cpp"}},
             .factory = [this] {
                 return std::make_unique<TestComponent>("sample.cpp.only", stats_);
             },
-        });
+        }));
     }
 
 private:

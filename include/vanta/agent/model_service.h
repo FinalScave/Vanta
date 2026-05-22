@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 
-#include "vanta/agent/agent_tool_registry.h"
 #include "vanta/core/registration.h"
 #include "vanta/core/value.h"
 
@@ -92,6 +91,8 @@ public:
 
 class ModelService {
 public:
+    static constexpr const char* kServiceId = "vanta.agent.models";
+
     RegistrationHandle RegisterProvider(std::unique_ptr<ModelProvider> provider);
     void RemoveProvider(const std::string& provider_id);
     std::vector<std::string> ProviderIds() const;

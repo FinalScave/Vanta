@@ -12,6 +12,8 @@ struct GitDiff {
 
 class GitService {
 public:
+    static constexpr const char* kServiceId = "vanta.git";
+
     virtual ~GitService() = default;
 
     virtual GitDiff Diff() const = 0;

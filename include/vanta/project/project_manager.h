@@ -1,129 +1,21 @@
 #pragma once
 
-#include <any>
-#include <filesystem>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include "vanta/core/event.h"
 #include "vanta/core/registration.h"
-#include "vanta/core/value.h"
-#include "vanta/workspace/workspace.h"
-#include "vanta/vfs/virtual_file.h"
+#include "vanta/project/component.h"
+#include "vanta/project/project.h"
 
 namespace vanta {
 
 class WorkspaceContext;
-class ProjectModelBuilder;
-
-enum class ProjectOrigin {
-    kWorkspace,
-    kSingleFile,
-    kScratch,
-};
-
-struct ProjectFacet {
-    std::string id;
-    std::string type;
-    std::string title;
-};
-
-struct ProjectModule {
-    std::string id;
-    std::string name;
-    VirtualFile content_root;
-    std::vector<VirtualFile> source_roots;
-    std::vector<VirtualFile> excluded_roots;
-    std::vector<ProjectFacet> facets;
-};
-
-struct ProjectAttachmentInfo {
-    std::string id;
-    std::string kind;
-    std::string title;
-    Value summary;
-    Value projection;
-};
-
-struct ProjectModel {
-    ProjectOrigin origin = ProjectOrigin::kWorkspace;
-    VirtualFile root;
-    std::vector<ProjectModule> modules;
-    std::vector<ProjectFacet> facets;
-    std::vector<ProjectAttachmentInfo> attachment_infos;
-    std::map<std::string, std::any> attachments;
-
-    bool HasFacet(const std::string& type) const;
-    bool HasAttachment(const std::string& id) const;
-    std::optional<ProjectAttachmentInfo> AttachmentInfo(const std::string& id) const;
-
-    template <class T>
-    void SetAttachment(ProjectAttachmentInfo info, T attachment) {
-        if (info.id.empty()) {
-            return;
-        }
-        if (info.summary.IsNull()) {
-            info.summary = Value::ObjectValue();
-        }
-        if (info.projection.IsNull()) {
-            info.projection = info.summary;
-        }
-        attachments[info.id] = std::move(attachment);
-        for (ProjectAttachmentInfo& existing : attachment_infos) {
-            if (existing.id == info.id) {
-                existing = std::move(info);
-                return;
-            }
-        }
-        attachment_infos.push_back(std::move(info));
-    }
-
-    template <class T>
-    const T* Attachment(const std::string& id) const {
-        auto found = attachments.find(id);
-        if (found == attachments.end()) {
-            return nullptr;
-        }
-        return std::any_cast<T>(&found->second);
-    }
-};
-
-struct SingleFileModel {
-    static constexpr const char* kAttachmentId = "vanta.singleFile";
-    static constexpr const char* kAttachmentKind = "singleFile";
-
-    VirtualFile file;
-    std::string language_id;
-    std::filesystem::path working_directory;
-};
-
-class ProjectModelBuilder {
-public:
-    ProjectModelBuilder(ProjectOrigin origin, VirtualFile root);
-
-    ProjectOrigin Origin() const;
-    const VirtualFile& Root() const;
-    bool Empty() const;
-
-    void AddModule(ProjectModule module);
-    void AddFacet(ProjectFacet facet);
-    void AddFacetToPrimaryModule(ProjectFacet facet);
-
-    template <class T>
-    void SetAttachment(ProjectAttachmentInfo info, T attachment) {
-        model_.SetAttachment(std::move(info), std::move(attachment));
-    }
-
-    const ProjectModel& Preview() const;
-    ProjectModel Build();
-
-private:
-    ProjectModel model_;
-};
+class Project;
 
 class ProjectModelProvider {
 public:
@@ -131,32 +23,6 @@ public:
 
     virtual std::string Id() const = 0;
     virtual void Contribute(WorkspaceContext& context, ProjectModelBuilder& builder) const = 0;
-};
-
-struct ProjectView {
-    std::string id;
-    std::string title;
-    std::string icon;
-    int priority = 0;
-};
-
-namespace ProjectViewNodeKind {
-inline constexpr std::string_view kGroup = "vanta.group";
-inline constexpr std::string_view kFile = "vanta.file";
-inline constexpr std::string_view kDirectory = "vanta.directory";
-inline constexpr std::string_view kModule = "vanta.module";
-}
-
-struct ProjectViewNode {
-    std::string id;
-    std::string label;
-    std::string description;
-    std::string kind;
-    std::string icon;
-    VirtualFile file;
-    bool has_file = false;
-    bool has_children = false;
-    bool synthetic = false;
 };
 
 struct ProjectViewChangeEvent {
@@ -177,6 +43,8 @@ public:
 
 class ProjectManager {
 public:
+    static constexpr const char* kServiceId = "vanta.projects";
+
     ProjectManager();
 
     RegistrationHandle RegisterModelProvider(std::unique_ptr<ProjectModelProvider> provider);
@@ -187,10 +55,17 @@ public:
     std::vector<std::string> ViewProviderIds() const;
     void SetSingleFile(VirtualFile file, std::string language_id = {});
     void ClearSingleFile();
+    void BindComponent(Project& project, std::unique_ptr<Component> component) const;
+    bool UnbindComponent(Project& project, const std::string& id) const;
+    RegistrationHandle RegisterComponentProvider(ProjectComponentProvider provider);
 
-    const ProjectModel& Refresh(WorkspaceContext& context);
-    const ProjectModel& Current() const;
-    bool HasProject() const;
+    void BindDefaultComponents(Project& project) const;
+    void AttachProject(WorkspaceContext& context, Project& project);
+    void RestoreProject(Project& project, const ProjectState& state) const;
+    const ProjectModel& Refresh(WorkspaceContext& context, Project& project);
+    ProjectState SaveProject(const Project& project, const ProjectState& previous) const;
+    void CloseProject(Project& project) const;
+    void DetachProject(Project& project);
     std::vector<ProjectView> Views(WorkspaceContext& context) const;
     std::vector<ProjectViewNode> TopLevelNodes(WorkspaceContext& context, const std::string& view_id);
     std::vector<ProjectViewNode> Children(WorkspaceContext& context, const std::string& view_id, const ProjectViewNode& parent);
@@ -199,14 +74,18 @@ public:
     void InvalidateViews(ProjectViewChangeEvent event = {});
 
 private:
-    ProjectModel model_;
+    std::vector<ProjectComponentProvider> ComponentProviders() const;
+    void RemoveComponentProvider(const std::string& id, std::uint64_t registration_id);
+    void ReconcileActiveProject();
+
     std::map<std::string, std::unique_ptr<ProjectModelProvider>> model_providers_;
     std::map<std::string, std::unique_ptr<ProjectViewProvider>> view_providers_;
+    std::map<std::string, ProjectComponentProvider> component_providers_;
+    std::map<std::string, std::uint64_t> component_provider_registrations_;
     EventBus<ProjectViewChangeEvent> view_events_;
     std::optional<SingleFileModel> single_file_;
+    std::uint64_t next_component_provider_registration_ = 1;
+    Project* active_project_ = nullptr;
 };
-
-std::string ToString(ProjectOrigin origin);
-std::string PrimaryProjectType(const ProjectModel& model);
 
 }

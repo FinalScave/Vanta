@@ -111,6 +111,22 @@ bool CppCompilationDatabase::Available() const {
     return file.Valid() && !commands.empty();
 }
 
+std::string CppCompilationDatabase::Id() const {
+    return kAttachmentId;
+}
+
+std::string CppCompilationDatabase::Kind() const {
+    return kAttachmentKind;
+}
+
+std::string CppCompilationDatabase::Title() const {
+    return "C++ Compilation Database";
+}
+
+Value CppCompilationDatabase::Projection() const {
+    return internal::CppCompilationDatabaseProjection(*this);
+}
+
 std::vector<std::string> CppCompileArguments(const CppCompileCommand& command) {
     if (!command.arguments.empty()) {
         return command.arguments;
@@ -261,6 +277,69 @@ std::unique_ptr<IndexProvider> CreateCppCompilationDatabaseIndexProvider() {
     };
 
     return std::make_unique<Provider>();
+}
+
+namespace internal {
+
+namespace {
+
+Value StringsProjection(const std::vector<std::string>& values) {
+    Value::Array result;
+    for (const std::string& value : values) {
+        result.push_back(Value(value));
+    }
+    return Value::ArrayValue(std::move(result));
+}
+
+Value VirtualFilesProjection(const std::vector<VirtualFile>& files) {
+    Value::Array values;
+    for (const VirtualFile& file : files) {
+        values.push_back(Value(file.ToUri().ToString()));
+    }
+    return Value::ArrayValue(std::move(values));
+}
+
+Value CppCompileCommandProjection(const CppCompileCommand& command) {
+    Value::Array arguments;
+    for (const std::string& argument : CppCompileArguments(command)) {
+        arguments.push_back(Value(argument));
+    }
+    return Value::ObjectValue({
+        {"directory", Value(command.directory.string())},
+        {"file", Value(command.file.string())},
+        {"command", Value(command.command)},
+        {"arguments", Value::ArrayValue(std::move(arguments))},
+    });
+}
+
+Value CppTranslationUnitProjection(const CppTranslationUnit& unit) {
+    return Value::ObjectValue({
+        {"sourceFile", Value(unit.source_file.ToUri().ToString())},
+        {"includeDirectories", VirtualFilesProjection(unit.include_directories)},
+        {"defines", StringsProjection(unit.defines)},
+        {"compileArguments", StringsProjection(unit.compile_arguments)},
+    });
+}
+
+}
+
+Value CppCompilationDatabaseProjection(const CppCompilationDatabase& database) {
+    Value::Array commands;
+    for (const CppCompileCommand& command : database.commands) {
+        commands.push_back(CppCompileCommandProjection(command));
+    }
+    Value::Array translation_units;
+    for (const CppTranslationUnit& unit : database.translation_units) {
+        translation_units.push_back(CppTranslationUnitProjection(unit));
+    }
+    return Value::ObjectValue({
+        {"file", Value(database.file.ToUri().ToString())},
+        {"available", Value(database.Available())},
+        {"commands", Value::ArrayValue(std::move(commands))},
+        {"translationUnits", Value::ArrayValue(std::move(translation_units))},
+    });
+}
+
 }
 
 }

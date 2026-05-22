@@ -43,6 +43,8 @@ struct ProjectTemplateResult {
 
 class ProjectTemplateService {
 public:
+    static constexpr const char* kServiceId = "vanta.projectTemplates";
+
     void AddCategory(ProjectTemplateCategory category);
     RegistrationHandle RegisterCategory(ProjectTemplateCategory category);
     void RemoveCategory(const std::string& id);
@@ -74,6 +76,8 @@ struct ScratchFileResult {
 
 class ScratchFileService {
 public:
+    static constexpr const char* kServiceId = "vanta.scratchFiles";
+
     ScratchFileResult CreateScratchFile(WorkspaceContext& context, ScratchFileRequest request) const;
 };
 

@@ -42,6 +42,8 @@ private:
 
 class LocalizationRegistry {
 public:
+    static constexpr const char* kServiceId = "vanta.localization";
+
     explicit LocalizationRegistry(std::string default_locale = "en-US");
 
     const std::string& DefaultLocale() const;

@@ -14,7 +14,7 @@ data names close to standard C++ conventions.
 - Filenames use `snake_case.h` and `snake_case.cpp`.
 - Vanta-owned JSON, plugin RPC, manifests, persisted state, and schema fields
   use `lowerCamel`.
-- Setting ids, command ids, contribution ids, and kind strings use dotted
+- Setting ids, command ids, capability ids, and kind strings use dotted
   `lowerCamel` when Vanta owns the schema.
 
 Examples:

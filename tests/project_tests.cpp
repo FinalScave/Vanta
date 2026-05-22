@@ -11,8 +11,7 @@ void TestProjectManager() {
       "name": "CMake Support",
       "version": "0.1.0",
       "publisher": "Vanta",
-      "runtime": {"kind": "core", "entry": "builtin:cmake"},
-      "permissions": ["process.execute", "build.provider", "agent.tool"]
+      "runtime": {"kind": "core", "entry": "builtin:cmake"}
     })");
     std::filesystem::create_directories(root / "include");
     WriteFile(root / "build" / "compile_commands.json", std::string(R"([
@@ -24,8 +23,7 @@ void TestProjectManager() {
     ])"));
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     vanta::ConsoleLogger logger;
@@ -42,13 +40,11 @@ void TestProjectManager() {
     const auto* cpp = project.Attachment<vanta::CppCompilationDatabase>(vanta::CppCompilationDatabase::kAttachmentId);
     REQUIRE(cmake != nullptr);
     REQUIRE(cpp != nullptr);
-    const auto cmake_info = project.AttachmentInfo(vanta::CMakeProjectModel::kAttachmentId);
-    const auto cpp_info = project.AttachmentInfo(vanta::CppCompilationDatabase::kAttachmentId);
-    REQUIRE(cmake_info.has_value());
-    REQUIRE(cpp_info.has_value());
-    REQUIRE(cmake_info->projection.Contains("graph"));
-    REQUIRE(cpp_info->projection.Contains("translationUnits"));
-    REQUIRE(cpp_info->projection["translationUnits"].IsArray());
+    const vanta::Value cmake_projection = cmake->Projection();
+    const vanta::Value cpp_projection = cpp->Projection();
+    REQUIRE(cmake_projection.Contains("graph"));
+    REQUIRE(cpp_projection.Contains("translationUnits"));
+    REQUIRE(cpp_projection["translationUnits"].IsArray());
     REQUIRE(cmake->cmake_lists_file.ToUri() == session.Context().CurrentWorkspace().File("CMakeLists.txt").ToUri());
     REQUIRE(cmake->compile_commands_file.ToUri() == session.Context().CurrentWorkspace().File("build/compile_commands.json").ToUri());
     REQUIRE(cpp->translation_units.size() == 1);
@@ -99,8 +95,7 @@ void TestRunConfigurationsAndSingleFileProject() {
       "name": "Core Languages",
       "version": "0.1.0",
       "publisher": "Vanta",
-      "runtime": {"kind": "core", "entry": "builtin:languages"},
-      "permissions": ["language.service"]
+      "runtime": {"kind": "core", "entry": "builtin:languages"}
     })");
     WriteFile(root / "plugins" / "python" / "vanta.plugin.json", R"({
       "id": "vanta.python",
@@ -108,13 +103,11 @@ void TestRunConfigurationsAndSingleFileProject() {
       "version": "0.1.0",
       "publisher": "Vanta",
       "runtime": {"kind": "core", "entry": "builtin:python"},
-      "activationEvents": ["onLanguage:python"],
-      "permissions": ["workspace.read", "process.execute"]
+      "activationEvents": ["onLanguage:python"]
     })");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root / "script.py", &error));
     vanta::ConsoleLogger logger;
@@ -128,9 +121,7 @@ void TestRunConfigurationsAndSingleFileProject() {
     const auto* single_file = session.Context().RequireProject().Model().Attachment<vanta::SingleFileModel>(vanta::SingleFileModel::kAttachmentId);
     REQUIRE(single_file != nullptr);
     REQUIRE(single_file->language_id == "python");
-    const auto single_file_info = session.Context().RequireProject().Model().AttachmentInfo(vanta::SingleFileModel::kAttachmentId);
-    REQUIRE(single_file_info.has_value());
-    REQUIRE(single_file_info->projection.StringValue("languageId").value_or("") == "python");
+    REQUIRE(single_file->Projection().StringValue("languageId").value_or("") == "python");
     auto* project_runs = session.Context().RequireProject().GetComponent<vanta::ProjectRunConfigurations>(vanta::ProjectRunConfigurations::kComponentId);
     REQUIRE(project_runs != nullptr);
 
@@ -139,25 +130,27 @@ void TestRunConfigurationsAndSingleFileProject() {
     REQUIRE(targets.front().id == "local.default");
     REQUIRE(targets.front().executor_id == "vanta.localExecutor");
 
-    const auto produced = session.Context().RunConfigurations().Produce(session.Context(), {});
-    REQUIRE(produced.size() == 1);
-    REQUIRE(produced.front().type_id == "python.script");
+    const auto discovered = session.Context().RunConfigurations().Discover(session.Context(), {});
+    REQUIRE(discovered.size() == 1);
+    REQUIRE(discovered.front().provider_id == "python.script");
 
-    auto payload = std::make_unique<vanta::CustomCommandRunConfigurationPayload>();
-    payload->executable = "/bin/echo";
-    payload->arguments = {"ok"};
-    payload->working_directory = root;
-
-    vanta::RunConfiguration configuration;
+    vanta::RunConfiguration configuration =
+        session.Context().RunConfigurations().Create(session.Context(), "custom.command", {}, "Echo");
     configuration.id = "custom.echo";
-    configuration.name = "Echo";
-    configuration.type_id = "custom.command";
-    configuration.target_id = "local.default";
-    configuration.payload = std::move(payload);
     configuration.temporary = true;
+    auto* provider = session.Context().RunConfigurations().Provider("custom.command");
+    REQUIRE(provider != nullptr);
+    const auto fields = provider->Fields(session.Context(), configuration);
+    REQUIRE(std::any_of(fields.begin(), fields.end(), [](const vanta::RunConfigurationField& field) {
+        return field.id == "executable" && field.kind == "string" && field.default_value.IsString();
+    }));
+    REQUIRE(provider->SetFieldValue(*configuration.data, "executable", vanta::Value("/bin/echo")));
+    REQUIRE(provider->SetFieldValue(*configuration.data, "arguments", vanta::Value::ArrayValue({vanta::Value("ok")})));
+    REQUIRE(provider->SetFieldValue(*configuration.data, "workingDirectory", vanta::Value(root.string())));
+    REQUIRE(provider->GetFieldValue(*configuration.data, "executable").AsString() == "/bin/echo");
     project_runs->AddConfiguration(std::move(configuration));
     REQUIRE(project_runs->Configuration("custom.echo").has_value());
-    const vanta::RunResult result = session.Context().RunConfigurations().Run(session.Context(), "custom.echo");
+    const vanta::RunResult result = session.Context().RunConfigurations().RunSaved(session.Context(), "custom.echo");
     REQUIRE(result.exit_code == 0);
     REQUIRE(result.output.find("ok") != std::string::npos);
     REQUIRE(result.job_id != 0);
@@ -171,8 +164,7 @@ void TestProjectComponentStatePersistence() {
 
     {
         vanta::VirtualFileSystem vfs;
-        vanta::AsyncRuntime async_runtime(1);
-        vanta::WorkspaceRuntime session(vfs, async_runtime);
+        vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
         std::string error;
         REQUIRE(session.Open(root, &error));
         vanta::UiStateStore ui(session.Context());
@@ -187,8 +179,7 @@ void TestProjectComponentStatePersistence() {
 
     {
         vanta::VirtualFileSystem vfs;
-        vanta::AsyncRuntime async_runtime(1);
-        vanta::WorkspaceRuntime session(vfs, async_runtime);
+        vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
         std::string error;
         REQUIRE(session.Open(root, &error));
         vanta::UiStateStore ui(session.Context());
@@ -205,14 +196,15 @@ void TestComponentLifecycleAndEventCleanup() {
     WriteFile(root / "main.cpp", "int main() { return 0; }\n");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
 
     ComponentTestStats stats;
     stats.saved_value = 7;
-    session.Context().BindComponent(std::make_unique<TestComponent>("sample.component", stats));
+    session.Context().Projects().BindComponent(
+        session.Context().RequireProject(),
+        std::make_unique<TestComponent>("sample.component", stats));
     REQUIRE(stats.attached == 1);
 
     session.RefreshProject();
@@ -221,7 +213,7 @@ void TestComponentLifecycleAndEventCleanup() {
     session.Context().Publish({.kind = vanta::IdeEventKind::ProjectChanged, .file = session.Context().CurrentWorkspace().RootFile()});
     REQUIRE(stats.events == events_before_publish + 1);
 
-    REQUIRE(session.Context().UnbindComponent("sample.component"));
+    REQUIRE(session.Context().Projects().UnbindComponent(session.Context().RequireProject(), "sample.component"));
     REQUIRE(stats.saved == 1);
     REQUIRE(stats.closed == 1);
     REQUIRE(stats.detached == 1);
@@ -247,9 +239,10 @@ void TestComponentStateIsolation() {
     ComponentTestStats stats;
     {
         vanta::VirtualFileSystem vfs;
-        vanta::AsyncRuntime async_runtime(1);
-        vanta::WorkspaceRuntime session(vfs, async_runtime);
-        session.Context().RequireProject().Components().Bind(std::make_unique<TestComponent>("bad.state", stats, true, true));
+        vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
+        session.Context().Projects().BindComponent(
+            session.Context().RequireProject(),
+            std::make_unique<TestComponent>("bad.state", stats, true, true));
         std::string error;
         REQUIRE(session.Open(root, &error));
         REQUIRE(stats.attached == 1);

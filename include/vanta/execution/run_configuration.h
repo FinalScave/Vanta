@@ -1,9 +1,11 @@
 #pragma once
 
 #include <map>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "vanta/core/registration.h"
@@ -18,11 +20,12 @@ namespace vanta {
 class WorkspaceContext;
 struct ExecutionTarget;
 
-struct ConfigurationField {
+struct RunConfigurationField {
     std::string id;
     std::string title;
-    std::string type;
+    std::string kind;
     Value default_value;
+    std::vector<Value> options;
     bool required = false;
 };
 
@@ -31,11 +34,11 @@ struct ValidationResult {
     std::vector<std::string> messages;
 };
 
-class RunConfigurationPayload {
+class RunConfigurationData {
 public:
-    virtual ~RunConfigurationPayload() = default;
+    virtual ~RunConfigurationData() = default;
 
-    virtual std::unique_ptr<RunConfigurationPayload> Clone() const = 0;
+    virtual std::unique_ptr<RunConfigurationData> Clone() const = 0;
 };
 
 struct RunConfiguration {
@@ -48,20 +51,20 @@ struct RunConfiguration {
 
     std::string id;
     std::string name;
-    std::string type_id;
+    std::string provider_id;
     std::string target_id;
-    std::unique_ptr<RunConfigurationPayload> payload;
+    std::unique_ptr<RunConfigurationData> data;
     bool temporary = false;
 };
 
-class CustomCommandRunConfigurationPayload final : public RunConfigurationPayload {
+class CustomCommandRunConfigurationData final : public RunConfigurationData {
 public:
     std::string executable;
     std::vector<std::string> arguments;
     std::filesystem::path working_directory;
 
-    std::unique_ptr<RunConfigurationPayload> Clone() const override;
-    static std::unique_ptr<RunConfigurationPayload> FromValue(const Value& value);
+    std::unique_ptr<RunConfigurationData> Clone() const override;
+    static std::unique_ptr<RunConfigurationData> FromValue(const Value& value);
 };
 
 struct RunResult {
@@ -77,43 +80,49 @@ struct RunExecutionContext {
     ExecutionTarget target;
 };
 
-class RunConfigurationType {
+class RunConfigurationProvider {
 public:
-    virtual ~RunConfigurationType() = default;
+    virtual ~RunConfigurationProvider() = default;
 
     virtual std::string Id() const = 0;
     virtual std::string Title() const = 0;
-    virtual std::unique_ptr<RunConfigurationPayload> DefaultPayload(WorkspaceContext& context) const = 0;
-    virtual std::unique_ptr<RunConfigurationPayload> DeserializePayload(const Value& value) const = 0;
-    virtual Value SerializePayload(const RunConfigurationPayload& payload) const = 0;
-    virtual std::vector<ConfigurationField> Fields() const = 0;
+    virtual std::string Category() const;
+    virtual RunConfiguration Create(
+        WorkspaceContext& context,
+        const VirtualFile& focus_file = VirtualFile(),
+        const std::string& name_hint = "") const = 0;
+    virtual std::vector<RunConfiguration> Discover(WorkspaceContext& context, const VirtualFile& focus_file) const;
+    virtual std::unique_ptr<RunConfigurationData> LoadData(const Value& value) const = 0;
+    virtual Value SaveData(const RunConfigurationData& data) const = 0;
+    virtual std::vector<RunConfigurationField> Fields(WorkspaceContext& context, const RunConfiguration& configuration) const;
+    virtual Value GetFieldValue(const RunConfigurationData& data, std::string_view field_id) const;
+    virtual bool SetFieldValue(RunConfigurationData& data, std::string_view field_id, const Value& value) const;
     virtual ValidationResult Validate(WorkspaceContext& context, const RunConfiguration& configuration) const = 0;
     virtual RunResult Run(RunExecutionContext& context, const RunConfiguration& configuration) const = 0;
 };
 
-class RunConfigurationProducer {
+class RunConfigurationService {
 public:
-    virtual ~RunConfigurationProducer() = default;
+    static constexpr const char* kServiceId = "vanta.runConfigurations";
 
-    virtual std::string Id() const = 0;
-    virtual std::vector<RunConfiguration> Produce(WorkspaceContext& context, const VirtualFile& focus_file) const = 0;
-};
+    virtual ~RunConfigurationService() = default;
 
-class RunConfigurationRegistry {
-public:
-    virtual ~RunConfigurationRegistry() = default;
+    virtual RegistrationHandle RegisterProvider(std::unique_ptr<RunConfigurationProvider> provider) = 0;
+    virtual void RemoveProvider(const std::string& provider_id) = 0;
+    virtual RunConfigurationProvider* Provider(const std::string& provider_id) const = 0;
+    virtual std::vector<std::string> ProviderIds() const = 0;
 
-    virtual RegistrationHandle RegisterType(std::unique_ptr<RunConfigurationType> type) = 0;
-    virtual void RemoveType(const std::string& type_id) = 0;
-    virtual RunConfigurationType* Type(const std::string& type_id) const = 0;
-    virtual std::vector<std::string> TypeIds() const = 0;
-
-    virtual RegistrationHandle RegisterProducer(std::unique_ptr<RunConfigurationProducer> producer) = 0;
-    virtual void RemoveProducer(const std::string& producer_id) = 0;
-    virtual std::vector<std::string> ProducerIds() const = 0;
-
-    virtual std::vector<RunConfiguration> Produce(WorkspaceContext& context, const VirtualFile& focus_file) const = 0;
-    virtual RunResult Run(WorkspaceContext& context, const std::string& configuration_id, const std::string& target_id = "") const = 0;
+    virtual RunConfiguration Create(
+        WorkspaceContext& context,
+        const std::string& provider_id,
+        const VirtualFile& focus_file = VirtualFile(),
+        const std::string& name_hint = "") const = 0;
+    virtual std::vector<RunConfiguration> Discover(WorkspaceContext& context, const VirtualFile& focus_file) const = 0;
+    virtual RunResult Run(
+        WorkspaceContext& context,
+        const RunConfiguration& configuration,
+        const std::string& target_id = "") const = 0;
+    virtual RunResult RunSaved(WorkspaceContext& context, const std::string& configuration_id, const std::string& target_id = "") const = 0;
 };
 
 class ProjectRunConfigurations final : public Component {
@@ -137,6 +146,6 @@ private:
     std::map<std::string, RunConfiguration> configurations_;
 };
 
-void RegisterDefaultRunConfigurationProviders(RunConfigurationRegistry& catalog);
+void RegisterDefaultRunConfigurations(RunConfigurationService& catalog);
 
 }

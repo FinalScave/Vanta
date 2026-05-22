@@ -41,6 +41,6 @@ Stored values include their type:
 }
 ```
 
-Plugins should use `ExtensionContext::workspaceContext().Settings()` to
-contribute setting nodes and definitions. Plugin-private caches and state should
-use plugin storage or component state, not settings.
+Plugins should use `ExtensionContext::Context().Settings()` to register setting
+nodes and definitions. Plugin-private caches and state should use plugin storage
+or component state, not settings.

@@ -9,12 +9,5 @@
   },
   "activationEvents": [
     "onWorkspaceContains:.git"
-  ],
-  "permissions": [
-    "workspace.read",
-    "workspace.write",
-    "git.read",
-    "git.write",
-    "agent.tool"
   ]
 }

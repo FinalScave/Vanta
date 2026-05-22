@@ -16,6 +16,8 @@ struct DiagnosticChangeEvent {
 
 class DiagnosticService {
 public:
+    static constexpr const char* kServiceId = "vanta.diagnostics";
+
     void Publish(std::string source, std::vector<Diagnostic> diagnostics);
     void Clear(const std::string& source);
     std::vector<Diagnostic> DiagnosticsForFile(const VirtualFile& file) const;

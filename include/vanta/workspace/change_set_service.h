@@ -8,29 +8,16 @@
 
 #include "vanta/workspace/document_service.h"
 #include "vanta/workspace/workspace.h"
+#include "vanta/workspace/workspace_edit.h"
 
 namespace vanta {
 
-enum class WorkspaceEditOperationKind {
-    ReplaceFile,
-    EditText,
-    CreateFile,
-    DeleteFile,
-    RenameFile,
-};
-
-struct WorkspaceEditOperation {
-    WorkspaceEditOperationKind kind = WorkspaceEditOperationKind::ReplaceFile;
-    VirtualFile file;
-    VirtualFile target_file;
-    std::string original_text;
-    std::string replacement_text;
-    std::vector<TextEdit> text_edits;
-    std::uint64_t expected_document_version = 0;
-};
-
-struct WorkspaceEdit {
-    std::vector<WorkspaceEditOperation> operations;
+enum class ChangeSetStatus {
+    Pending,
+    Approved,
+    Rejected,
+    Applied,
+    Undone,
 };
 
 struct WorkspaceEditConflict {
@@ -43,14 +30,6 @@ struct WorkspaceEditConflict {
 struct WorkspaceEditPreflight {
     bool ok = true;
     std::vector<WorkspaceEditConflict> conflicts;
-};
-
-enum class ChangeSetStatus {
-    Pending,
-    Approved,
-    Rejected,
-    Applied,
-    Undone,
 };
 
 struct ChangeSet {
@@ -76,6 +55,8 @@ struct ChangeSetResult {
 
 class ChangeSetService {
 public:
+    static constexpr const char* kServiceId = "vanta.changes";
+
     ChangeSet Create(
         std::string source,
         std::string title,
@@ -133,7 +114,6 @@ private:
     std::uint64_t next_change_set_id_ = 1;
 };
 
-std::string ToString(WorkspaceEditOperationKind kind);
 std::string ToString(ChangeSetStatus status);
 std::string CreateUnifiedDiff(
     const VirtualFile& file,

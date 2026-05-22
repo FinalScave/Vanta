@@ -11,9 +11,5 @@
     "onLanguage:cpp",
     "onWorkspaceContains:CMakeLists.txt",
     "onWorkspaceContains:compile_commands.json"
-  ],
-  "permissions": [
-    "workspace.read",
-    "process.execute"
   ]
 }

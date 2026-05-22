@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "vanta/core/value.h"
+#include "vanta/project/project.h"
 #include "vanta/vfs/virtual_file.h"
 
 namespace vanta {
@@ -27,9 +28,14 @@ struct CMakeProjectGraph {
     std::vector<std::string> compile_arguments;
 };
 
-struct CMakeProjectModel {
+struct CMakeProjectModel final : public ProjectAttachment {
     static constexpr const char* kAttachmentId = "vanta.cmake.project";
     static constexpr const char* kAttachmentKind = "cmake.project";
+
+    std::string Id() const override;
+    std::string Kind() const override;
+    std::string Title() const override;
+    Value Projection() const override;
 
     bool detected = false;
     VirtualFile cmake_lists_file;
@@ -37,5 +43,11 @@ struct CMakeProjectModel {
     std::filesystem::path build_directory;
     CMakeProjectGraph graph;
 };
+
+namespace internal {
+
+Value CMakeProjectGraphProjection(const CMakeProjectGraph& graph);
+
+}
 
 }

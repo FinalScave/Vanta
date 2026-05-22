@@ -2,7 +2,8 @@
 
 #include <utility>
 
-#include "vanta/project/project_manager.h"
+#include "vanta/project/project.h"
+#include "vanta/workspace/workspace.h"
 #include "vanta/workspace/workspace_context.h"
 
 namespace vanta {

@@ -5,13 +5,13 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "vanta/core/localization.h"
 #include "vanta/core/registration.h"
 #include "vanta/core/value.h"
-#include "vanta/plugin/permissions.h"
-#include "vanta/project/component.h"
+#include "vanta/plugin/plugin_storage.h"
 #include "vanta/workspace/workspace.h"
 #include "vanta/workspace/workspace_context.h"
 
@@ -41,10 +41,16 @@ public:
     virtual const WorkspaceInfo& Workspace() const = 0;
     virtual Logger& Log() = 0;
     virtual WorkspaceContext& Context() = 0;
+    void* GetService(std::string_view service_id) {
+        return Context().GetService(service_id);
+    }
+    template <typename T>
+    T* GetService() {
+        return Context().GetService<T>();
+    }
     virtual Localizer LocalizerValue() const = 0;
-    virtual const PermissionSet& Permissions() const = 0;
+    virtual PluginStorageService& Storage() = 0;
     virtual void Track(RegistrationHandle registration) = 0;
-    virtual void ContributeComponent(ComponentContribution contribution) = 0;
 };
 
 }

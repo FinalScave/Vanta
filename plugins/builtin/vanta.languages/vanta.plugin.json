@@ -9,8 +9,5 @@
   },
   "activationEvents": [
     "onStartup"
-  ],
-  "permissions": [
-    "language.service"
   ]
 }

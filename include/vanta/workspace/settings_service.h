@@ -131,6 +131,8 @@ private:
 
 class SettingsService {
 public:
+    static constexpr const char* kServiceId = "vanta.settings";
+
     void RegisterNode(SettingNode node);
     void RegisterSetting(SettingDefinition definition);
 
@@ -166,20 +168,6 @@ private:
     std::map<std::string, SettingDefinition> definitions_;
     std::map<SettingScope, SettingsStore> stores_;
     EventBus<SettingChangeEvent> on_did_change_;
-};
-
-class PluginStorageService {
-public:
-    explicit PluginStorageService(std::filesystem::path root = {});
-
-    void SetRoot(std::filesystem::path root);
-    Result<void> Write(std::string plugin_id, std::string key, Value value) const;
-    Result<Value> Read(const std::string& plugin_id, const std::string& key) const;
-
-private:
-    std::filesystem::path PathFor(const std::string& plugin_id, const std::string& key) const;
-
-    std::filesystem::path root_;
 };
 
 void RegisterDefaultSettings(SettingsService& settings);

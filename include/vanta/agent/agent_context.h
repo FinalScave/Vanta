@@ -11,21 +11,20 @@
 #include "vanta/core/diagnostic.h"
 #include "vanta/core/value.h"
 #include "vanta/vfs/virtual_file.h"
-#include "vanta/workspace/git_service.h"
 
 namespace vanta {
 
 class WorkspaceContext;
 
-enum class AgentContextItemKind {
-    Text,
-    Document,
-    Diagnostics,
-    Project,
-    Job,
-    SearchIndex,
-    GitDiff,
-};
+namespace AgentContextKind {
+inline constexpr const char* kText = "text";
+inline constexpr const char* kDocument = "document";
+inline constexpr const char* kDiagnostics = "diagnostics";
+inline constexpr const char* kProject = "project";
+inline constexpr const char* kJob = "job";
+inline constexpr const char* kSearchIndex = "searchIndex";
+inline constexpr const char* kGitDiff = "gitDiff";
+}
 
 struct AgentContextRequest {
     std::string goal;
@@ -36,7 +35,7 @@ struct AgentContextRequest {
 
 struct AgentContextItem {
     std::string provider_id;
-    AgentContextItemKind kind = AgentContextItemKind::Text;
+    std::string kind = AgentContextKind::kText;
     std::string title;
     VirtualFile file;
     std::string text;
@@ -57,6 +56,8 @@ public:
 
 class AgentContextCollector {
 public:
+    static constexpr const char* kServiceId = "vanta.agent.context";
+
     RegistrationHandle RegisterProvider(std::unique_ptr<AgentContextProvider> provider);
     void RemoveProvider(const std::string& provider_id);
     void ClearProviders();
@@ -68,7 +69,5 @@ private:
 };
 
 void RegisterDefaultAgentContextProviders(AgentContextCollector& service);
-std::unique_ptr<AgentContextProvider> CreateGitDiffAgentContextProvider(const GitService& git);
-std::string ToString(AgentContextItemKind kind);
 
 }

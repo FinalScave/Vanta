@@ -1,14 +1,14 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "vanta/core/registration.h"
-#include "vanta/core/diagnostic.h"
 #include "vanta/core/value.h"
-#include "vanta/vfs/virtual_file.h"
 
 namespace vanta {
 
@@ -23,16 +23,23 @@ struct AgentToolDefinition {
 
 class AgentToolRegistry {
 public:
+    static constexpr const char* kServiceId = "vanta.agent.tools";
+
     RegistrationHandle RegisterTool(AgentToolDefinition definition);
     void RemoveTool(const std::string& id);
     std::optional<Value> CallTool(const std::string& id, const Value& input) const;
     std::vector<AgentToolDefinition> Tools() const;
 
-    std::optional<std::string> ReadCode(const VirtualFile& file) const;
-    std::string ExplainDiagnostic(const Diagnostic& diagnostic) const;
-
 private:
-    std::vector<AgentToolDefinition> tools_;
+    struct RegisteredTool {
+        AgentToolDefinition definition;
+        std::uint64_t registration_id = 0;
+    };
+
+    void RemoveToolRegistration(const std::string& id, std::uint64_t registration_id);
+
+    std::map<std::string, RegisteredTool> tools_;
+    std::uint64_t next_registration_id_ = 1;
 };
 
 }

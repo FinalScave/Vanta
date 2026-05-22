@@ -66,6 +66,7 @@ public:
     ExecutionStatus Status() const;
     bool Running() const;
     void Cancel();
+    void Terminate();
     ExecutionResult Wait();
     std::optional<ExecutionResult> ResultValue() const;
     std::vector<ExecutionEvent> EventsValue() const;
@@ -95,6 +96,8 @@ public:
 
 class ExecutionService {
 public:
+    static constexpr const char* kServiceId = "vanta.execution";
+
     RegistrationHandle RegisterProvider(std::unique_ptr<ExecutionProvider> provider);
     void RemoveProvider(const std::string& provider_id);
     std::vector<std::string> ProviderIds() const;

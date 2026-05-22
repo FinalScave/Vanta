@@ -7,8 +7,7 @@ void TestAgentRuntimeAndModelService() {
     WriteFile(root / "main.cpp", "int main() { return 0; }\n");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     session.Context().Models().RegisterProvider(std::make_unique<FakeModelProvider>());
@@ -24,7 +23,6 @@ void TestAgentRuntimeAndModelService() {
 
     REQUIRE(result.status == vanta::AgentSessionStatus::Completed);
     REQUIRE(result.model_response == "Plan generated");
-    REQUIRE(!result.plan.steps.empty());
     REQUIRE(events >= 3);
     REQUIRE(session.Context().Models().Model("test-model").has_value());
     REQUIRE(session.Context().Agents().Session(result.id).has_value());
@@ -36,19 +34,10 @@ void TestAgentRuntimeUsesOperationProtocol() {
     WriteFile(root / "main.cpp", "int main() { return 0; }\n");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     session.Context().Models().RegisterProvider(std::make_unique<ToolCallingModelProvider>());
-    session.Context().AgentTools().RegisterTool({
-        .id = "test.echo",
-        .description = "Echo test input",
-        .input_schema = vanta::Value(vanta::Value::ObjectValue()),
-        .handler = [](const vanta::Value& input) {
-            return vanta::Value(vanta::Value::ObjectValue({{"echo", input}}));
-        },
-    });
 
     vanta::AgentSessionRequest request;
     request.goal = "Use a tool";
@@ -56,12 +45,103 @@ void TestAgentRuntimeUsesOperationProtocol() {
     const vanta::AgentSession result = session.Context().Agents().StartSession(session.Context(), request);
 
     REQUIRE(result.status == vanta::AgentSessionStatus::Completed);
-    REQUIRE(result.plan.steps.size() == 2);
-    REQUIRE(result.plan.steps.back().kind == vanta::AgentStepKind::Operation);
-    const auto records = session.Context().AgentOperationJournal().Records();
+    REQUIRE(result.operation_ids.size() == 1);
+    const auto records = session.Context().AgentOperations().Records();
     REQUIRE(records.size() == 1);
-    REQUIRE(records.front().kind == vanta::AgentOperationKind::CallTool);
+    REQUIRE(records.front().kind == vanta::AgentOperationKind::ReadFile);
     REQUIRE(records.front().ok);
+    session.Close();
+}
+
+void TestAgentRuntimeStartsSessionsAsynchronously() {
+    const auto root = MakeTempRoot();
+    WriteFile(root / "main.cpp", "int main() { return 0; }\n");
+
+    vanta::AsyncRuntime async_runtime(1);
+    vanta::VirtualFileSystem vfs;
+    vanta::WorkspaceRuntime session(vfs, vanta::AsyncJobDispatcher(async_runtime));
+    std::string error;
+    REQUIRE(session.Open(root, &error));
+    session.Context().Models().RegisterProvider(std::make_unique<FakeModelProvider>());
+
+    int events = 0;
+    vanta::AgentSessionRequest request;
+    request.goal = "Improve main";
+    request.model_id = "test-model";
+    const vanta::AgentSession started = session.Context().Agents().StartSession(session.Context(), request, [&](const vanta::AgentRuntimeEvent&) {
+        ++events;
+    });
+
+    REQUIRE(!started.id.empty());
+    REQUIRE(started.job_id != 0);
+    session.Context().Jobs().Wait(started.job_id);
+    const auto completed = session.Context().Agents().Session(started.id);
+    REQUIRE(completed.has_value());
+    REQUIRE(completed->status == vanta::AgentSessionStatus::Completed);
+    REQUIRE(completed->model_response == "Plan generated");
+    REQUIRE(events >= 3);
+    session.Close();
+}
+
+void TestAgentRuntimeCollaborationState() {
+    const auto root = MakeTempRoot();
+    WriteFile(root / "main.cpp", "int main() { return 0; }\n");
+
+    vanta::VirtualFileSystem vfs;
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
+    std::string error;
+    REQUIRE(session.Open(root, &error));
+    session.Context().Models().RegisterProvider(std::make_unique<FakeModelProvider>());
+
+    vanta::AgentSessionRequest request;
+    request.work_kind = vanta::AgentWorkKind::Review;
+    request.goal = "Review: Check main";
+    request.model_id = "test-model";
+    request.participants = {{
+        .id = "reviewer",
+        .display_name = "Reviewer",
+        .model_id = "test-model",
+        .role = "review",
+    }};
+    request.ownership_scopes = {{
+        .kind = vanta::OwnershipScopeKind::File,
+        .file = session.Context().CurrentWorkspace().File("main.cpp"),
+        .description = "Review main.cpp",
+    }};
+
+    const vanta::AgentSession started = session.Context().Agents().StartSession(session.Context(), request);
+    REQUIRE(started.status == vanta::AgentSessionStatus::Completed);
+    REQUIRE(started.request.work_kind == vanta::AgentWorkKind::Review);
+    REQUIRE(started.request.goal == "Review: Check main");
+    REQUIRE(started.request.participants.size() == 1);
+    REQUIRE(started.request.ownership_scopes.size() == 1);
+
+    const std::string finding_id = session.Context().Agents().AddFinding({
+        .session_id = started.id,
+        .category = vanta::AgentWorkKind::Review,
+        .severity = vanta::AgentFindingSeverity::Warning,
+        .title = "Return value",
+        .message = "The return value should be checked.",
+        .file = session.Context().CurrentWorkspace().File("main.cpp"),
+    });
+    REQUIRE(!finding_id.empty());
+
+    const std::string proposal_id = session.Context().Agents().AddProposal({
+        .session_id = started.id,
+        .title = "Update return value",
+        .summary = "Change the return value.",
+        .finding_ids = {finding_id},
+    });
+    REQUIRE(!proposal_id.empty());
+
+    const auto snapshot = session.Context().Agents().Session(started.id);
+    REQUIRE(snapshot.has_value());
+    REQUIRE(snapshot->finding_ids.size() == 1);
+    REQUIRE(snapshot->proposal_ids.size() == 1);
+    REQUIRE(session.Context().Agents().FindingsForSession(started.id).size() == 1);
+    REQUIRE(session.Context().Agents().ProposalsForSession(started.id).size() == 1);
+    REQUIRE(vanta::ToString(vanta::AgentWorkKind::Security) == "security");
+
     session.Close();
 }
 
@@ -70,8 +150,7 @@ void TestAgentContextAndOperationService() {
     WriteFile(root / "main.cpp", "int main() { return 0; }\n");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     const vanta::VirtualFile main_file = session.Context().CurrentWorkspace().File("main.cpp");
@@ -111,8 +190,7 @@ void TestAgentOperationService() {
     WriteFile(root / "main.cpp", "int main() { return 0; }\n");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     const vanta::VirtualFile main_file = session.Context().CurrentWorkspace().File("main.cpp");
@@ -149,7 +227,7 @@ void TestAgentOperationService() {
     REQUIRE(change.ok);
     REQUIRE(!change.change_set_id.empty());
     REQUIRE(session.Context().Changes().Get(change.change_set_id).has_value());
-    auto change_record = session.Context().AgentOperationJournal().Record("change-main");
+    auto change_record = session.Context().AgentOperations().Record("change-main");
     REQUIRE(change_record.has_value());
     REQUIRE(change_record->ok);
     REQUIRE(change_record->change_set_id == change.change_set_id);
@@ -170,7 +248,7 @@ void TestAgentOperationService() {
     REQUIRE(tool.ok);
     REQUIRE(tool.payload.has_value());
     REQUIRE(tool.payload->StringValue("value").value_or("") == "ok");
-    REQUIRE(session.Context().AgentOperationJournal().Records().size() >= 4);
+    REQUIRE(session.Context().AgentOperations().Records().size() >= 4);
     const auto jobs = session.Context().Jobs().Jobs();
     REQUIRE(std::any_of(jobs.begin(), jobs.end(), [](const vanta::JobRecord& job) {
         return job.kind == vanta::JobKind::Agent && job.status == vanta::JobStatus::Succeeded;
@@ -186,11 +264,36 @@ void TestAgentOperationService() {
     REQUIRE(!denied.ok);
     REQUIRE(denied.error.find("denied") != std::string::npos);
     REQUIRE(!session.Context().Approvals().History().empty());
-    const auto denied_record = session.Context().AgentOperationJournal().Record("denied-change");
+    const auto denied_record = session.Context().AgentOperations().Record("denied-change");
     REQUIRE(denied_record.has_value());
     REQUIRE(!denied_record->ok);
     REQUIRE(events >= 8);
     session.Close();
+}
+
+void TestAgentToolRegistryReplacesToolsSafely() {
+    vanta::AgentToolRegistry registry;
+    vanta::RegistrationHandle first = registry.RegisterTool({
+        .id = "test.echo",
+        .description = "First echo",
+        .handler = [](const vanta::Value&) {
+            return vanta::Value("first");
+        },
+    });
+    vanta::RegistrationHandle second = registry.RegisterTool({
+        .id = "test.echo",
+        .description = "Second echo",
+        .handler = [](const vanta::Value&) {
+            return vanta::Value("second");
+        },
+    });
+
+    REQUIRE(registry.Tools().size() == 1);
+    REQUIRE(registry.CallTool("test.echo", vanta::Value::ObjectValue())->AsString() == "second");
+    first.Unregister();
+    REQUIRE(registry.CallTool("test.echo", vanta::Value::ObjectValue())->AsString() == "second");
+    second.Unregister();
+    REQUIRE(!registry.CallTool("test.echo", vanta::Value::ObjectValue()).has_value());
 }
 
 }
@@ -203,10 +306,22 @@ TEST_CASE("Agent runtime uses operation protocol", "[agent]") {
     vanta::tests::TestAgentRuntimeUsesOperationProtocol();
 }
 
+TEST_CASE("Agent runtime starts sessions asynchronously", "[agent]") {
+    vanta::tests::TestAgentRuntimeStartsSessionsAsynchronously();
+}
+
+TEST_CASE("Agent runtime collaboration state", "[agent]") {
+    vanta::tests::TestAgentRuntimeCollaborationState();
+}
+
 TEST_CASE("Agent context and operation service", "[agent]") {
     vanta::tests::TestAgentContextAndOperationService();
 }
 
 TEST_CASE("Agent operation service", "[agent]") {
     vanta::tests::TestAgentOperationService();
+}
+
+TEST_CASE("Agent tool registry replaces tools safely", "[agent]") {
+    vanta::tests::TestAgentToolRegistryReplacesToolsSafely();
 }

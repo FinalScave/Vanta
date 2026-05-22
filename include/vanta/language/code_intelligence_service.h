@@ -7,10 +7,10 @@
 #include <variant>
 #include <vector>
 
+#include "vanta/core/cancellation.h"
 #include "vanta/core/registration.h"
-#include "vanta/language/language_service.h"
-#include "vanta/platform/async.h"
 #include "vanta/core/value.h"
+#include "vanta/language/language_service.h"
 
 namespace vanta {
 
@@ -24,7 +24,12 @@ enum class CodeIntelligenceKind {
     SemanticTokens,
 };
 
-using CodeIntelligencePayload = std::variant<std::monostate, CompletionList, HoverResult, LocationResult, SemanticTokens>;
+using CodeIntelligencePayload = std::variant<
+    std::monostate,
+    CompletionList,
+    HoverResult,
+    LocationResult,
+    SemanticTokens>;
 
 struct CodeIntelligenceRequest {
     CodeIntelligenceKind kind = CodeIntelligenceKind::Completion;
@@ -94,6 +99,8 @@ public:
 
 class CodeIntelligenceService {
 public:
+    static constexpr const char* kServiceId = "vanta.codeIntelligence";
+
     CodeIntelligenceService();
     ~CodeIntelligenceService();
 

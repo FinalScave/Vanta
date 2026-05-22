@@ -32,6 +32,8 @@ struct CapabilityChangeEvent {
 
 class CapabilityRegistry {
 public:
+    static constexpr const char* kServiceId = "vanta.capabilities";
+
     void Set(Capability capability);
     bool Remove(const std::string& id);
     std::optional<Capability> Get(const std::string& id) const;

@@ -31,7 +31,7 @@ Typed APIs should be the default for:
   attachments.
 - `BuildRequest`, `BuildPlan`, `BuildResult`, `ExecutionRequest`,
   `ExecutionTarget`, and `ExecutionResult`.
-- `RunConfiguration` and concrete `RunConfigurationPayload` implementations.
+- `RunConfiguration` and concrete `RunConfigurationData` implementations.
 - `LanguageService` inputs and outputs such as completion, hover, locations,
   diagnostics, and semantic tokens.
 - `SettingDefinition`, `SettingValue`, setting scopes, and setting resolution.
@@ -51,8 +51,7 @@ Good `Value` boundaries include:
 
 - Component state: `Component::SaveState`, `Component::RestoreState`, and
   `ProjectState::component_states`.
-- Project attachment summaries and projections when the provider owns the
-  projection schema.
+- Project attachment data when the provider owns the schema.
 - Plugin-owned layout/UI state such as `LayoutState::plugin_state`.
 - Plugin-private storage values.
 - Agent tool schemas, tool input, and tool output.
@@ -104,7 +103,7 @@ Acceptable uses include:
 Public platform APIs should avoid exposing nlohmann/json unless the API is
 itself a JSON protocol adapter.
 Projection helpers that turn domain objects into `Value` should stay in private
-adapter code, such as `src/vanta/internal`, instead of being declared from
+adapter code, such as `src/core/internal`, instead of being declared from
 `include/vanta` domain headers.
 
 ## Current Code Audit
@@ -117,13 +116,13 @@ The current code has converged on the main boundary decisions:
   cross-process wire data out of the core type system.
 - Settings use typed `SettingValue`, while JSON remains the store format.
 - `LanguageService` exposes Vanta language result types instead of raw LSP JSON.
-- `RunConfigurationPayload` is typed and cloneable. Serialization belongs to
-  `RunConfigurationType`.
+- `RunConfigurationData` is typed and cloneable. Serialization belongs to
+  `RunConfigurationProvider`.
 - Job, model, agent, and debug extension payloads use direct optional `Value`
   fields instead of wrapper classes.
 - Plugin registration metadata is direct `Value metadata`.
 - Built-in plugin dependencies use typed dependency structs.
-- Project attachment summaries and projections use direct `Value` fields.
+- Project attachment data uses a direct `Value` field.
 - Agent tool input and schemas use direct `Value` fields instead of aliases or
   empty wrapper classes.
 
@@ -138,13 +137,12 @@ The current code still has areas that should continue to converge:
 
 Prefer this order when reducing dynamic data usage:
 
-- Keep `RunConfigurationPayload` typed, with payload serialization owned by
-  `RunConfigurationType`.
+- Keep `RunConfigurationData` typed, with data serialization owned by
+  `RunConfigurationProvider`.
 - Use direct optional `Value` fields where payload data is extension-owned.
 - Use direct `Value` metadata for plugin registrations.
 - Use explicit typed dependency fields for built-in plugin dependencies.
-- Use `Value` for project attachment metadata when the provider owns the
-  projection schema.
+- Use `Value` for project attachment metadata when the provider owns the schema.
 - Keep command execution dynamic for extension commands, but keep core service
   APIs typed.
 - Move public serialization helpers out of core semantic headers where practical.
@@ -155,20 +153,20 @@ Prefer this order when reducing dynamic data usage:
 
 ## Examples
 
-Typed run configuration payload:
+Typed run configuration data:
 
 ```cpp
-class RunConfigurationPayload {
+class RunConfigurationData {
 public:
-    virtual ~RunConfigurationPayload() = default;
-    virtual std::unique_ptr<RunConfigurationPayload> clone() const = 0;
+    virtual ~RunConfigurationData() = default;
+    virtual std::unique_ptr<RunConfigurationData> Clone() const = 0;
 };
 
-class RunConfigurationType {
+class RunConfigurationProvider {
 public:
-    virtual std::unique_ptr<RunConfigurationPayload> defaultPayload(WorkspaceContext& context) const = 0;
-    virtual std::unique_ptr<RunConfigurationPayload> deserializePayload(const Value& value) const = 0;
-    virtual Value serializePayload(const RunConfigurationPayload& payload) const = 0;
+    virtual RunConfiguration Create(WorkspaceContext& context, const VirtualFile& focus_file) const = 0;
+    virtual std::unique_ptr<RunConfigurationData> LoadData(const Value& value) const = 0;
+    virtual Value SaveData(const RunConfigurationData& data) const = 0;
 };
 ```
 

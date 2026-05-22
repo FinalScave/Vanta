@@ -9,11 +9,5 @@
   },
   "activationEvents": [
     "onWorkspaceContains:CMakeLists.txt"
-  ],
-  "permissions": [
-    "workspace.read",
-    "process.execute",
-    "build.provider",
-    "agent.tool"
   ]
 }

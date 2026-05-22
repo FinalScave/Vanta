@@ -2,15 +2,15 @@
 
 Vanta is an agent-native IDE platform.
 
-The goal is not to embed a chat assistant into a C++ editor. Vanta exposes
-structured IDE semantics to AI agents so they can understand and operate on a
-workspace through the same core model that powers the UI.
+The goal is to expose structured IDE semantics to AI agents so they can operate
+on a workspace through Vanta Core instead of raw files, shell output, and UI
+automation.
 
 ```text
-AI agent
+AI agent / UI / CLI
   -> Vanta Core
-  -> Workspace / Project / Index / Language / Build / Execution / ChangeSet
-  -> UI projection and approval when needed
+  -> Workspace / Project / Document / Language / Index
+  -> Build / Execution / Job / Debug / Git / Agent / ChangeSet
 ```
 
 C++ is the first proving ground because it makes structured context valuable:
@@ -19,68 +19,23 @@ multi-target builds, and module boundaries all affect whether an edit is
 correct. The platform is designed to support other project families through the
 same provider and plugin model.
 
-## Position
+## At A Glance
 
-Vanta is an agent-native IDE platform where AI agents operate on structured IDE
-semantics instead of raw files and shell output.
+- Vanta Core is a headless IDE kernel shared by agents, UI clients, CLI
+  workflows, tests, remote sessions, and future CI workflows.
+- `WorkspaceContext` is the public capability surface for workspace, project,
+  document, language, index, build, execution, jobs, debug, Git, settings,
+  plugins, agents, and change sets.
+- Agents operate through typed core services and auditable operations rather
+  than scraping UI state.
+- Agent edits should produce `ChangeSet` values that can be previewed,
+  approved, applied, and rolled back.
+- Language, build-system, project-model, execution, index, debug, model, and
+  agent-tool support is contributed through providers and plugins.
+- UI session state lives in the IDE layer, while shared project and agent
+  capabilities live in the core.
 
-Most coding agents can read files, grep text, ask LSP for symbols, run shell
-commands, and apply patches. Vanta aims to give agents a richer IDE kernel:
-
-- workspace and virtual file access
-- project model, facets, modules, and attachments
-- language resolution and language services
-- compiler and index data
-- build plans, execution targets, jobs, and diagnostics
-- run configurations and debug sessions
-- Git state and change sets
-- auditable agent operations and approval flow
-
-## Architecture
-
-Vanta is split into a headless core, an IDE/UI layer, lightweight clients, and
-plugins.
-
-```text
-Vanta Core
-  Workspace / Project / Document / Language / Index
-  Build / Execution / Job / Debug / Git
-  Agent / ChangeSet / Settings / Plugin lifecycle
-
-Vanta IDE
-  UI state / layout / editor tabs / command palette
-  Future Qt desktop frontend
-
-Clients
-  CLI
-  Headless agent session
-  Remote or CI session
-
-Plugins
-  Language providers
-  Build providers
-  Project model providers
-  Execution providers
-  Index providers
-  Agent tools and context providers
-  UI and command contributions
-```
-
-`WorkspaceContext` is the public capability surface for plugins, components,
-providers, agents, and UI-facing command code. `WorkspaceRuntime` owns lifecycle
-and concrete service instances behind that context.
-
-UI clients should react to core events and state projections. Agents should
-operate on Vanta Core directly rather than driving UI automation. Agent edits
-should create `ChangeSet` values, which can be previewed, approved, applied, and
-rolled back.
-
-UI session state, including tabs, active editor state, keybindings, and command
-palette projection, lives in the IDE/UI layer rather than `WorkspaceRuntime`.
-The CLI is a core debugging shell and assembles `WorkspaceRuntime` directly
-without depending on UI state.
-
-## First-Stage Scope
+## Current Scope
 
 The current first-stage architecture targets:
 
@@ -100,30 +55,6 @@ The current first-stage architecture targets:
 
 The UI can be built as a client of these core capabilities. The core can also be
 used headlessly by agents, tests, CLI workflows, or future remote sessions.
-
-## Plugin Model
-
-Built-in plugins may run in process and use C++ interfaces directly.
-Built-in plugin packages live under `plugins/builtin/vanta.*`; their manifests,
-resources, and implementation sources stay with the package, while the current
-build still compiles them into the core target.
-
-Third-party plugin boundaries should remain ABI-stable:
-
-- Stable native plugins should use C handles and function tables.
-- Cross-language plugins should use out-of-process RPC.
-- Public binary plugin ABI should not expose STL containers, smart pointers, or
-  virtual-class binary boundaries.
-
-Provider interfaces are the main extension points:
-
-- `ProjectModelProvider`
-- `LanguageService`
-- `BuildProvider`
-- `ExecutionProvider`
-- `IndexProvider`
-- `DebugProvider`
-- model providers, agent tools, and agent context providers
 
 ## Build
 
@@ -160,4 +91,5 @@ cmake --build build --target vanta_tests
 - [Agent-native platform](docs/architecture/agent-native-platform.md)
 - [Service boundaries](docs/architecture/services.md)
 - [Data boundaries](docs/architecture/data-boundaries.md)
+- [ABI boundaries](docs/architecture/abi.md)
 - [Settings](docs/architecture/settings.md)

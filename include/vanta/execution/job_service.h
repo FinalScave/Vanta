@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <condition_variable>
 #include <functional>
@@ -12,7 +13,6 @@
 
 #include "vanta/core/event.h"
 #include "vanta/core/value.h"
-#include "vanta/platform/async.h"
 
 namespace vanta {
 
@@ -72,6 +72,16 @@ enum class JobThread {
     Main,
 };
 
+using JobTask = std::function<void()>;
+using JobDispatch = std::function<void(JobTask)>;
+
+struct JobDispatcher {
+    JobDispatch worker;
+    JobDispatch main;
+
+    void Dispatch(JobThread thread, JobTask task) const;
+};
+
 struct JobChangeEvent {
     JobRecord job;
 };
@@ -101,8 +111,10 @@ public:
     JobId Id() const;
     bool Valid() const;
     bool Cancel();
+    bool Terminate();
     std::optional<JobRecord> Record() const;
     std::optional<JobRecord> Wait() const;
+    std::optional<JobRecord> Wait(std::chrono::milliseconds timeout) const;
 
 private:
     JobService* service_ = nullptr;
@@ -111,10 +123,14 @@ private:
 
 class JobService {
 public:
+    static constexpr const char* kServiceId = "vanta.jobs";
+
+    explicit JobService(JobDispatcher dispatcher);
+
     JobId Create(JobKind kind, std::string title, std::vector<JobId> dependencies = {});
     JobId Start(JobKind kind, std::string title, std::vector<JobId> dependencies = {});
-    JobHandle Submit(AsyncRuntime& runtime, JobRequest request, JobFunction function, JobThread thread = JobThread::Worker);
-    JobHandle Submit(AsyncRuntime& runtime, JobId id, JobFunction function, JobThread thread = JobThread::Worker);
+    JobHandle Submit(JobRequest request, JobFunction function, JobThread thread = JobThread::Worker);
+    JobHandle Submit(JobId id, JobFunction function, JobThread thread = JobThread::Worker);
     void MarkRunning(JobId id, std::string message = {});
     void UpdateProgress(JobId id, double progress, std::string message = {});
     void AppendOutput(JobId id, const std::string& output);
@@ -124,11 +140,15 @@ public:
     void Complete(JobId id, bool success, std::string message = {});
     void Cancel(JobId id, std::string message = {});
     bool RequestCancel(JobId id);
+    bool RequestCancelAll();
+    bool Terminate(JobId id, std::string message = {});
+    void TerminateAll(std::string message = {});
     bool CancellationRequested(JobId id) const;
     bool IsTerminal(JobId id) const;
     bool Ready(JobId id) const;
     std::optional<JobRecord> Job(JobId id) const;
     std::optional<JobRecord> Wait(JobId id) const;
+    std::optional<JobRecord> Wait(JobId id, std::chrono::milliseconds timeout) const;
     std::vector<JobRecord> Jobs() const;
     void Clear();
 
@@ -145,7 +165,10 @@ private:
     mutable std::mutex mutex_;
     mutable std::condition_variable changed_;
     EventBus<JobChangeEvent> on_did_change_;
+    JobDispatcher dispatcher_;
 };
+
+JobDispatcher InlineJobDispatcher();
 
 std::string ToString(JobKind kind);
 std::string ToString(JobStatus status);

@@ -123,6 +123,8 @@ public:
 
 class DebugService {
 public:
+    static constexpr const char* kServiceId = "vanta.debug";
+
     RegistrationHandle RegisterProvider(std::unique_ptr<DebugProvider> provider);
     void RemoveProvider(const std::string& provider_id);
     std::vector<std::string> ProviderIds() const;

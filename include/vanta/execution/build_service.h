@@ -1,7 +1,6 @@
 #pragma once
 
 #include <filesystem>
-#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -78,6 +77,7 @@ public:
     BuildStatus Status() const;
     bool Running() const;
     void Cancel();
+    void Terminate();
     BuildResult Wait();
     std::optional<BuildResult> ResultValue() const;
     std::vector<ExecutionEvent> EventsValue() const;
@@ -99,6 +99,8 @@ public:
 
 class BuildService {
 public:
+    static constexpr const char* kServiceId = "vanta.build";
+
     virtual ~BuildService() = default;
 
     virtual RegistrationHandle RegisterProvider(std::unique_ptr<BuildProvider> provider) = 0;
@@ -117,18 +119,5 @@ public:
 
 std::string ToString(BuildRequestKind kind);
 std::string ToString(BuildStatus status);
-
-using BuildCancellationCheck = std::function<bool()>;
-class AsyncRuntime;
-class JobService;
-
-using BuildOperation = std::function<BuildResult(ExecutionEventCallback, BuildCancellationCheck)>;
-
-BuildHandle StartBuildOperation(
-    JobService& jobs,
-    AsyncRuntime& runtime,
-    JobId job_id,
-    BuildOperation operation,
-    ExecutionEventCallback on_event = {});
 
 }

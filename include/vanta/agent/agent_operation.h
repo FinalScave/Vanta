@@ -8,11 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "vanta/agent/agent_context.h"
-#include "vanta/agent/agent_tool_registry.h"
 #include "vanta/core/diagnostic.h"
 #include "vanta/execution/build_service.h"
 #include "vanta/core/value.h"
+#include "vanta/agent/model_service.h"
 #include "vanta/vfs/virtual_file.h"
 #include "vanta/workspace/change_set_service.h"
 #include "vanta/workspace/index_service.h"
@@ -89,40 +88,34 @@ struct AgentOperationRecord {
     std::vector<AgentOperationEvent> events;
 };
 
-class AgentOperationJournal {
+class AgentOperationService {
 public:
-    void RecordStart(const AgentOperationRequest& request);
-    void RecordEvent(const AgentOperationEvent& event);
-    void RecordResult(const std::string& operation_id, const AgentOperationResult& result);
+    static constexpr const char* kServiceId = "vanta.agent.operations";
+
     std::optional<AgentOperationRecord> Record(const std::string& operation_id) const;
     std::vector<AgentOperationRecord> Records() const;
     void Clear();
 
-private:
-    AgentOperationRecord& Ensure(const std::string& operation_id, AgentOperationKind kind);
-
-    std::map<std::string, AgentOperationRecord> records_;
-    std::vector<std::string> order_;
-};
-
-class AgentOperationService {
-public:
-    void SetJournal(AgentOperationJournal* journal);
-    AgentOperationJournal* Journal() const;
-
     AgentOperationResult Execute(
         WorkspaceContext& context,
         const AgentOperationRequest& request,
-        AgentOperationCallback on_event = {}) const;
+        AgentOperationCallback on_event = {});
 
 private:
-    std::string NextOperationId() const;
+    void RecordStart(const AgentOperationRequest& request);
+    void RecordEvent(const AgentOperationEvent& event);
+    void RecordResult(const std::string& operation_id, const AgentOperationResult& result);
+    AgentOperationRecord& Ensure(const std::string& operation_id, AgentOperationKind kind);
+    std::string NextOperationId();
 
-    AgentOperationJournal* journal_ = nullptr;
-    mutable std::uint64_t next_operation_id_ = 1;
+    std::map<std::string, AgentOperationRecord> records_;
+    std::vector<std::string> order_;
+    std::uint64_t next_operation_id_ = 1;
 };
 
 std::string ToString(AgentOperationKind kind);
 std::string ToString(AgentOperationStatus status);
+std::vector<ModelToolDefinition> AgentOperationToolDefinitions();
+AgentOperationRequest AgentOperationRequestFromToolCall(WorkspaceContext& context, const ModelToolCall& call);
 
 }

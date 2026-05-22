@@ -5,7 +5,7 @@
 namespace vanta::tests {
 
 void TestJobService() {
-    vanta::JobService jobs;
+    vanta::JobService jobs(vanta::InlineJobDispatcher());
     const vanta::JobId id = jobs.Start(vanta::JobKind::Agent, "Agent job");
     jobs.AppendOutput(id, "hello");
     jobs.Complete(id, true);
@@ -14,8 +14,7 @@ void TestJobService() {
     REQUIRE(job->status == vanta::JobStatus::Succeeded);
     REQUIRE(job->output == "hello");
 
-    vanta::AsyncRuntime runtime(1);
-    const vanta::JobHandle handle = jobs.Submit(runtime, {
+    const vanta::JobHandle handle = jobs.Submit({
         .kind = vanta::JobKind::Plugin,
         .title = "Posted job",
         .cancellable = true,
@@ -34,6 +33,22 @@ void TestJobService() {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     REQUIRE(false);
+}
+
+void TestJobTermination() {
+    vanta::JobService jobs(vanta::InlineJobDispatcher());
+    const vanta::JobId id = jobs.Start(vanta::JobKind::Generic, "Terminable job");
+    bool handler_called = false;
+    jobs.SetCancelHandler(id, [&] {
+        handler_called = true;
+    });
+
+    REQUIRE(jobs.Terminate(id, "stop now"));
+    REQUIRE(handler_called);
+    const auto record = jobs.Wait(id, std::chrono::milliseconds(1));
+    REQUIRE(record.has_value());
+    REQUIRE(record->status == vanta::JobStatus::Cancelled);
+    REQUIRE(record->message == "stop now");
 }
 
 void TestProcessRealtimeCallbacks() {
@@ -65,8 +80,7 @@ void TestBuildHandle() {
     const auto root = MakeTempRoot();
     WriteFile(root / "src" / "main.cpp", "int main() {\n  return ;\n}\n");
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
 
@@ -122,8 +136,7 @@ void TestBuildHandle() {
 void TestExecutionHandle() {
     const auto root = MakeTempRoot();
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
 
@@ -198,6 +211,10 @@ void TestExecutionHandle() {
 
 TEST_CASE("Job service", "[execution]") {
     vanta::tests::TestJobService();
+}
+
+TEST_CASE("Job termination", "[execution]") {
+    vanta::tests::TestJobTermination();
 }
 
 TEST_CASE("Process realtime callbacks", "[execution]") {

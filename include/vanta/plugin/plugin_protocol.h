@@ -20,36 +20,27 @@ struct PluginRpcResponse {
     std::string error;
 };
 
-enum class PluginRegistrationKind {
+enum class PluginCapabilityKind {
     Command,
-    View,
-    Menu,
     AgentTool,
-    AgentContextProvider,
     BuildProvider,
     LanguageService,
-    FileSystemProvider,
-    RunConfiguration,
-    DiagnosticProvider,
     ModelProvider,
     DebugProvider,
-    Component,
 };
 
-struct PluginRegistration {
-    PluginRegistrationKind kind = PluginRegistrationKind::Command;
+struct PluginCapabilityRegistration {
+    PluginCapabilityKind kind = PluginCapabilityKind::Command;
     std::string id;
     std::string title;
-    std::string plugin_id;
-    bool metadata_only = false;
     Value metadata = Value::ObjectValue();
 };
 
 std::optional<PluginRpcResponse> ParsePluginRpcResponse(const Value& json);
 std::optional<PluginRpcResponse> ParsePluginRpcResponseText(const std::string& json_text);
-std::optional<PluginRegistration> ParsePluginRegistration(const Value& json);
+std::optional<PluginCapabilityRegistration> ParsePluginCapabilityRegistration(const Value& json);
 std::string FormatPluginRpcRequestText(const PluginRpcRequest& request);
 std::string FormatPluginRpcResponseText(const PluginRpcResponse& response);
-std::string ToString(PluginRegistrationKind kind);
+std::string ToString(PluginCapabilityKind kind);
 
 }

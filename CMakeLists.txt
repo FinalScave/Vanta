@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(Vanta VERSION 0.1.0 LANGUAGES CXX)
+project(Vanta)
 
 include(cmake/VantaOptions.cmake)
 include(cmake/VantaThirdParty.cmake)
@@ -8,6 +8,7 @@ include(cmake/VantaThirdParty.cmake)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(VANTA_BUILTIN_INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}/plugins/builtin/src
     ${CMAKE_CURRENT_SOURCE_DIR}/plugins/builtin/vanta.clice/src
     ${CMAKE_CURRENT_SOURCE_DIR}/plugins/builtin/vanta.cmake/src
     ${CMAKE_CURRENT_SOURCE_DIR}/plugins/builtin/vanta.cpp/src
@@ -16,16 +17,7 @@ set(VANTA_BUILTIN_INCLUDE_DIRS
 file(GLOB_RECURSE VANTA_CORE_SOURCES CONFIGURE_DEPENDS
     plugins/builtin/src/*.cpp
     plugins/builtin/*/src/*.cpp
-    src/agent/*.cpp
     src/core/*.cpp
-    src/debug/*.cpp
-    src/execution/*.cpp
-    src/language/*.cpp
-    src/platform/*.cpp
-    src/plugin/*.cpp
-    src/project/*.cpp
-    src/vfs/*.cpp
-    src/workspace/*.cpp
 )
 
 function(vanta_configure_core_target target_name)
@@ -34,6 +26,7 @@ function(vanta_configure_core_target target_name)
             ${CMAKE_CURRENT_SOURCE_DIR}/include
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/core
             ${VANTA_BUILTIN_INCLUDE_DIRS}
     )
 
@@ -76,7 +69,6 @@ endif()
 
 file(GLOB_RECURSE VANTA_IDE_SOURCES CONFIGURE_DEPENDS
     src/ide/*.cpp
-    src/ui/*.cpp
 )
 
 add_library(vanta_ide ${VANTA_IDE_SOURCES})
@@ -87,17 +79,20 @@ target_include_directories(vanta_ide
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ide
 )
 target_compile_features(vanta_ide PUBLIC cxx_std_20)
 
 file(GLOB_RECURSE VANTA_CLI_SOURCES CONFIGURE_DEPENDS
-    src/app/*.cpp
+    src/cli/*.cpp
 )
 
 add_executable(vanta_cli ${VANTA_CLI_SOURCES})
 target_link_libraries(vanta_cli PRIVATE vanta_core)
 target_include_directories(vanta_cli PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     ${VANTA_BUILTIN_INCLUDE_DIRS}
 )
 set_target_properties(vanta_cli PROPERTIES OUTPUT_NAME vanta)
@@ -112,6 +107,8 @@ if(BUILD_VANTA_TESTS)
     target_link_libraries(vanta_tests PRIVATE vanta_ide Vanta3p::Catch2)
     target_include_directories(vanta_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ide
         ${VANTA_BUILTIN_INCLUDE_DIRS}
     )
     add_test(NAME vanta_tests COMMAND vanta_tests)

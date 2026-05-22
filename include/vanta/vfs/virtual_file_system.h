@@ -26,6 +26,8 @@ public:
 
 class VirtualFileSystem {
 public:
+    static constexpr const char* kServiceId = "vanta.fileSystems";
+
     VirtualFileSystem();
 
     RegistrationHandle RegisterProvider(std::string scheme, std::unique_ptr<FileSystemProvider> provider);

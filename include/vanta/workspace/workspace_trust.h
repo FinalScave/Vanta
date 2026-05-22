@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "vanta/plugin/permissions.h"
+#include "vanta/workspace/access_control.h"
 #include "vanta/core/event.h"
 #include "vanta/core/value.h"
 
@@ -20,8 +20,8 @@ enum class WorkspaceTrustLevel {
 struct WorkspaceTrustPolicy {
     WorkspaceTrustLevel level = WorkspaceTrustLevel::Trusted;
     bool allow_remembered_approvals = true;
-    std::vector<Permission> blocked_permissions;
-    std::vector<Permission> high_risk_blocked_permissions;
+    std::vector<AccessKind> blocked_access;
+    std::vector<AccessKind> high_risk_blocked_access;
 };
 
 struct WorkspaceTrustChangeEvent {
@@ -31,15 +31,17 @@ struct WorkspaceTrustChangeEvent {
 
 class WorkspaceTrustService {
 public:
+    static constexpr const char* kServiceId = "vanta.workspaceTrust";
+
     WorkspaceTrustService();
 
     void SetLevel(WorkspaceTrustLevel level);
     WorkspaceTrustLevel Level() const;
     WorkspaceTrustPolicy Policy() const;
     bool Trusted() const;
-    bool Allows(Permission permission, bool high_risk = false) const;
+    bool Allows(AccessKind access, bool high_risk = false) const;
     bool CanRememberApprovals() const;
-    std::string DenialReason(Permission permission, bool high_risk = false) const;
+    std::string DenialReason(AccessKind access, bool high_risk = false) const;
 
     std::uint64_t OnDidChangeTrust(EventBus<WorkspaceTrustChangeEvent>::Listener listener);
     void RemoveTrustListener(std::uint64_t listener_id);

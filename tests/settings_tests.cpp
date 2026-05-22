@@ -1,4 +1,5 @@
 #include "test_support.h"
+#include "vanta/plugin/plugin_storage.h"
 
 namespace vanta::tests {
 

@@ -1,5 +1,8 @@
 #include "test_support.h"
 
+#include "vanta/ide/ide_application.h"
+#include "vanta/ide/ui_service.h"
+
 namespace vanta::tests {
 
 void TestWorkspace() {
@@ -33,13 +36,11 @@ void TestWorkspaceRuntimeEvents() {
       "name": "CMake Support",
       "version": "0.1.0",
       "publisher": "Vanta",
-      "runtime": {"kind": "core", "entry": "builtin:cmake"},
-      "permissions": ["process.execute", "build.provider", "agent.tool"]
+      "runtime": {"kind": "core", "entry": "builtin:cmake"}
     })");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
 
     std::vector<vanta::IdeEventKind> events;
     session.Context().Events().Subscribe([&](const vanta::IdeEvent& event) {
@@ -82,6 +83,7 @@ void TestWorkspaceRuntimeEvents() {
     REQUIRE(std::find(events.begin(), events.end(), vanta::IdeEventKind::ProjectChanged) != events.end());
     REQUIRE(std::find(events.begin(), events.end(), vanta::IdeEventKind::DocumentOpened) != events.end());
     REQUIRE(std::find(events.begin(), events.end(), vanta::IdeEventKind::DiagnosticsChanged) != events.end());
+    REQUIRE(std::find(events.begin(), events.end(), vanta::IdeEventKind::JobChanged) != events.end());
     REQUIRE(std::find(events.begin(), events.end(), vanta::IdeEventKind::JobStarted) != events.end());
     REQUIRE(std::find(events.begin(), events.end(), vanta::IdeEventKind::JobCompleted) != events.end());
     REQUIRE(std::find(events.begin(), events.end(), vanta::IdeEventKind::WorkspaceClosed) != events.end());
@@ -96,8 +98,7 @@ void TestWorkspacePlatformServices() {
       "version": "0.1.0",
       "publisher": "Vanta",
       "runtime": {"kind": "core", "entry": "builtin:languages"},
-      "activationEvents": ["onStartup"],
-      "permissions": ["language.service"]
+      "activationEvents": ["onStartup"]
     })");
     WriteFile(root / "plugins" / "cpp" / "vanta.plugin.json", R"({
       "id": "vanta.cpp",
@@ -105,8 +106,7 @@ void TestWorkspacePlatformServices() {
       "version": "0.1.0",
       "publisher": "Vanta",
       "runtime": {"kind": "core", "entry": "builtin:cpp"},
-      "activationEvents": ["onLanguage:cpp"],
-      "permissions": ["workspace.read", "process.execute"]
+      "activationEvents": ["onLanguage:cpp"]
     })");
     WriteFile(root / "plugins" / "python" / "vanta.plugin.json", R"({
       "id": "vanta.python",
@@ -114,13 +114,11 @@ void TestWorkspacePlatformServices() {
       "version": "0.1.0",
       "publisher": "Vanta",
       "runtime": {"kind": "core", "entry": "builtin:python"},
-      "activationEvents": ["onLanguage:python"],
-      "permissions": ["workspace.read", "process.execute"]
+      "activationEvents": ["onLanguage:python"]
     })");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     vanta::ConsoleLogger logger;
@@ -128,12 +126,14 @@ void TestWorkspacePlatformServices() {
     vanta::CorePluginRegistry registry = vanta::CreateDefaultCorePluginRegistry();
     manager.Scan(root / "plugins");
     manager.ActivateCorePlugins(registry, logger, session.Context());
+    WaitForJobs(session.Context(), vanta::JobKind::Index);
 
-    REQUIRE(session.Context().Initialization().Completed(vanta::WorkspaceInitializationStage::WorkspaceOpened));
-    REQUIRE(session.Context().Initialization().Completed(vanta::WorkspaceInitializationStage::FileIndexReady));
-    REQUIRE(session.Context().Initialization().Completed(vanta::WorkspaceInitializationStage::AgentContextReady));
+    REQUIRE(session.Context().GetService<vanta::CommandRegistry>() == &session.Context().Commands());
+    REQUIRE(session.Context().GetService<vanta::BuildService>() == &session.Context().Build());
+    REQUIRE(session.Context().GetService<vanta::LanguageRegistry>() == &session.Context().Languages());
     REQUIRE(session.Context().Capabilities().Available("workspace.open"));
     REQUIRE(session.Context().Capabilities().Get("index.workspace").has_value());
+    REQUIRE(session.Context().Capabilities().Get("agent.operations").has_value());
     REQUIRE(!session.Context().Jobs().Jobs().empty());
 
     const auto snapshots = session.Context().Indexes().Snapshots();
@@ -176,8 +176,7 @@ void TestLayoutAndCommandPalette() {
     WriteFile(root / "main.cpp", "int main() { return 0; }\n");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     vanta::UiStateStore ui(session.Context());
@@ -191,22 +190,112 @@ void TestLayoutAndCommandPalette() {
     REQUIRE(layout->State().open_tabs.size() == 1);
     REQUIRE(layout->State().last_build_target == "vanta_tests");
 
-    session.Context().Commands().RegisterCommand("sample.run", [](const vanta::Value&) {
-        return vanta::Value::ObjectValue();
-    });
-    session.Context().RegisterContribution({
-        .kind = vanta::PluginRegistrationKind::Command,
+    session.Context().Commands().RegisterCommand({
         .id = "sample.run",
         .title = "Sample: Run",
-        .plugin_id = "sample.plugin",
+        .source = "sample.plugin",
+    }, [](const vanta::Value&) {
+        return vanta::Value::ObjectValue();
     });
-    ui.Keybindings().Bind({.command_id = "sample.run", .key = "Cmd+R", .when = "workspaceOpen"});
+    ui.Keybindings().Bind({
+        .command_id = "sample.run",
+        .first = {.modifiers = vanta::KeyModifier::Meta | vanta::KeyModifier::Shift, .key = "R"},
+        .second = vanta::KeyChord{.modifiers = vanta::KeyModifierMask(vanta::KeyModifier::Ctrl), .key = "Enter"},
+        .when = "workspaceOpen",
+    });
 
-    const auto items = vanta::CommandPaletteItems(session.Context().Commands(), session.Context().Contributions(), ui.Keybindings());
+    const auto items = vanta::CommandPaletteItems(session.Context().Commands(), ui.Keybindings());
     const auto filtered = vanta::FilterCommandPaletteItems(items, "sample");
     REQUIRE(filtered.size() == 1);
-    REQUIRE(filtered[0].keybinding == "Cmd+R");
+    REQUIRE(filtered[0].keybinding == "Shift+Cmd+R Ctrl+Enter");
     session.Close();
+}
+
+void TestUiServiceInjectionAndProviders() {
+    class PanelProvider final : public vanta::UiPanelProvider {
+    public:
+        std::string Id() const override {
+            return "sample.panels";
+        }
+
+        std::vector<vanta::UiPanelDescriptor> Panels(vanta::WorkspaceContext&) const override {
+            return {
+                {
+                    .id = "sample.output",
+                    .title = "Output",
+                    .location = vanta::UiLocations::kBottomToolWindow,
+                    .sort_order = 20,
+                },
+                {
+                    .id = "sample.agent",
+                    .title = "Agent",
+                    .location = vanta::UiLocations::kRightToolWindow,
+                    .sort_order = 10,
+                },
+            };
+        }
+    };
+
+    class ActionProvider final : public vanta::UiActionProvider {
+    public:
+        std::string Id() const override {
+            return "sample.actions";
+        }
+
+        std::vector<vanta::UiActionDescriptor> Actions(vanta::WorkspaceContext&) const override {
+            return {{
+                .id = "sample.run",
+                .title = "Run",
+                .location = vanta::UiLocations::kToolbar,
+                .command_id = "sample.run",
+            }};
+        }
+    };
+
+    class SettingsProvider final : public vanta::UiSettingsPageProvider {
+    public:
+        std::string Id() const override {
+            return "sample.settings";
+        }
+
+        std::vector<vanta::UiSettingsPageDescriptor> SettingsPages(vanta::WorkspaceContext&) const override {
+            return {{
+                .id = "sample.settings",
+                .title = "Sample",
+                .parent_id = "tools",
+                .command_id = "sample.settings.open",
+            }};
+        }
+    };
+
+    const auto root = MakeTempRoot();
+    WriteFile(root / "main.cpp", "int main() { return 0; }\n");
+
+    vanta::IdeApplication app;
+    std::string error;
+    REQUIRE(app.OpenWorkspace(root, {}, &error));
+    auto* ui = app.Context().GetService<vanta::UiService>();
+    REQUIRE(ui == &app.Ui());
+
+    PanelProvider panels;
+    ActionProvider actions;
+    SettingsProvider settings;
+    auto panel_registration = ui->RegisterPanelProvider(&panels);
+    auto action_registration = ui->RegisterActionProvider(&actions);
+    auto settings_registration = ui->RegisterSettingsPageProvider(&settings);
+
+    REQUIRE(panel_registration.Registered());
+    REQUIRE(action_registration.Registered());
+    REQUIRE(settings_registration.Registered());
+    REQUIRE(ui->PanelProviderIds().size() == 1);
+    REQUIRE(ui->Panels(app.Context()).size() == 2);
+    REQUIRE(ui->Panels(app.Context())[0].id == "sample.agent");
+    REQUIRE(ui->Actions(app.Context()).size() == 1);
+    REQUIRE(ui->SettingsPages(app.Context()).size() == 1);
+
+    panel_registration.Unregister();
+    REQUIRE(ui->Panels(app.Context()).empty());
+    app.Shutdown();
 }
 
 }
@@ -225,4 +314,8 @@ TEST_CASE("Workspace platform services", "[workspace]") {
 
 TEST_CASE("Layout and command palette", "[workspace]") {
     vanta::tests::TestLayoutAndCommandPalette();
+}
+
+TEST_CASE("UI service injection and providers", "[workspace]") {
+    vanta::tests::TestUiServiceInjectionAndProviders();
 }

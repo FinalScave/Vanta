@@ -21,11 +21,12 @@ enum class IdeEventKind {
     DocumentSaved,
     DocumentClosed,
     DiagnosticsChanged,
+    IndexChanged,
+    JobChanged,
     JobStarted,
     JobCompleted,
     ChangeSetProposed,
     ChangeSetApplied,
-    ContributionsChanged,
 };
 
 struct IdeEvent {

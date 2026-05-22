@@ -1,13 +1,17 @@
-#include "ide/ide_application.h"
+#include "vanta/ide/ide_application.h"
 
 #include <cassert>
 #include <utility>
 
+#include "ide/ui_service_impl.h"
+#include "vanta/platform/async_job_dispatcher.h"
 #include "vanta/workspace/workspace_runtime.h"
 
 namespace vanta {
 
-IdeApplication::IdeApplication() = default;
+IdeApplication::IdeApplication()
+    : ui_service_(std::make_unique<internal::UiServiceImpl>()) {
+}
 
 IdeApplication::~IdeApplication() = default;
 
@@ -15,15 +19,21 @@ bool IdeApplication::OpenWorkspace(const std::filesystem::path& workspace_path, 
     Shutdown();
     async_.Start();
 
-    runtime_ = std::make_unique<WorkspaceRuntime>(vfs_, async_);
+    runtime_ = std::make_unique<WorkspaceRuntime>(
+        vfs_,
+        AsyncJobDispatcher(async_),
+        [this](JobTask task) {
+            async_.PostMain(std::move(task));
+        });
     if (!runtime_->Open(workspace_path, error_message, false)) {
         runtime_.reset();
+        async_.Stop();
         return false;
     }
+    runtime_->Context().RegisterService(UiService::kServiceId, ui_service_.get());
 
     plugins_.Scan(runtime_->Context().CurrentWorkspace().Info().root_path / "plugins");
     core_plugins_ = CreateDefaultCorePluginRegistry(std::move(core_plugin_dependencies));
-    WireServices();
     ActivatePlugins();
     runtime_->InitializeWorkspace();
     runtime_->StartDocumentSync();
@@ -40,6 +50,9 @@ void IdeApplication::Shutdown() {
         runtime_->Close();
     }
     plugins_.DeactivateAll();
+    if (runtime_ != nullptr) {
+        runtime_->Context().UnregisterService(UiService::kServiceId, ui_service_.get());
+    }
     runtime_.reset();
     async_.Stop();
 }
@@ -86,6 +99,14 @@ const WorkspaceContext& IdeApplication::Context() const {
     return runtime_->Context();
 }
 
+UiService& IdeApplication::Ui() {
+    return *ui_service_;
+}
+
+const UiService& IdeApplication::Ui() const {
+    return *ui_service_;
+}
+
 PluginManager& IdeApplication::Plugins() {
     return plugins_;
 }
@@ -98,9 +119,8 @@ Logger& IdeApplication::LoggerValue() {
     return logger_;
 }
 
-void IdeApplication::WireServices() {
-    assert(runtime_ != nullptr);
-    runtime_->Context().AgentContext().RegisterProvider(CreateGitDiffAgentContextProvider(runtime_->Context().Git()));
+std::size_t IdeApplication::DrainMainTasks() {
+    return async_.DrainMain();
 }
 
 void IdeApplication::ActivatePlugins() {

@@ -7,8 +7,7 @@ void TestDebugService() {
     WriteFile(root / "main.cpp", "int main() { return 0; }\n");
 
     vanta::VirtualFileSystem vfs;
-    vanta::AsyncRuntime async_runtime(1);
-    vanta::WorkspaceRuntime session(vfs, async_runtime);
+    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
     session.Context().Debug().RegisterProvider(std::make_unique<FakeDebugProvider>());

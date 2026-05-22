@@ -1,13 +1,11 @@
 #pragma once
 
 #include <filesystem>
-#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
 
-#include "vanta/platform/async.h"
 #include "vanta/core/value.h"
 #include "vanta/platform/process.h"
 #include "vanta/core/text.h"
@@ -23,8 +21,6 @@ struct LspRequestResult {
     bool timed_out = false;
 };
 
-using LspResultCallback = std::function<void(LspRequestResult)>;
-
 class LspClient {
 public:
     bool Start(const std::filesystem::path& server_path, const std::filesystem::path& workspace_root, std::string* error_message = nullptr);
@@ -36,8 +32,6 @@ public:
     LspRequestResult Hover(const Uri& file, TextPosition position);
     LspRequestResult Definition(const Uri& file, TextPosition position);
     LspRequestResult SemanticTokensFull(const Uri& file);
-    void CompletionAsync(AsyncRuntime& runtime, Uri file, TextPosition position, LspResultCallback callback);
-    void HoverAsync(AsyncRuntime& runtime, Uri file, TextPosition position, LspResultCallback callback);
     void Notify(std::string method, Value params);
     std::vector<Value> DrainNotifications();
 
