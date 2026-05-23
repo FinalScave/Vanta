@@ -7,9 +7,12 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "mornox/agent/agent_context.h"
 #include "mornox/agent/agent_operation.h"
@@ -19,6 +22,7 @@
 #include "cpp_index.h"
 #include "mornox/debug/debug_service.h"
 #include "mornox/execution/build_service.h"
+#include "mornox/execution/execution_service.h"
 #include "mornox/execution/problem_matcher.h"
 #include "mornox/workspace/change_set_service.h"
 #include "cmake_project_model.h"
@@ -34,6 +38,7 @@
 #include "mornox/plugin/plugin_manager.h"
 #include "mornox/platform/async.h"
 #include "mornox/platform/async_job_dispatcher.h"
+#include "mornox/platform/executable.h"
 #include "mornox/platform/process.h"
 #include "mornox/core/json_codec.h"
 #include "mornox/core/result.h"
@@ -50,6 +55,102 @@
 
 
 namespace mornox::tests {
+
+inline std::string JsonString(std::string_view value) {
+    return mornox::ValueToJsonText(mornox::Value(std::string(value)));
+}
+
+inline std::string JsonPath(const std::filesystem::path& path) {
+    return JsonString(path.string());
+}
+
+inline mornox::Value StringArrayValue(const std::vector<std::string>& values) {
+    mornox::Value::Array array;
+    for (const std::string& value : values) {
+        array.push_back(mornox::Value(value));
+    }
+    return mornox::Value::ArrayValue(std::move(array));
+}
+
+inline std::string PythonBytes(std::string_view value) {
+    std::string result = "b'";
+    for (char character : value) {
+        switch (character) {
+        case '\\':
+            result += "\\\\";
+            break;
+        case '\'':
+            result += "\\'";
+            break;
+        case '\n':
+            result += "\\n";
+            break;
+        case '\r':
+            result += "\\r";
+            break;
+        default:
+            result.push_back(character);
+            break;
+        }
+    }
+    result += "'";
+    return result;
+}
+
+inline std::filesystem::path TestPythonExecutable() {
+#if defined(_WIN32)
+    const std::vector<std::string> candidates = {"python", "py"};
+    return mornox::FindFirstExecutableOnPath(candidates).value_or(std::filesystem::path("python"));
+#else
+    const std::vector<std::string> candidates = {
+        "/opt/local/bin/python3.11",
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+        "python3",
+        "python",
+    };
+    return mornox::FindFirstExecutableOnPath(candidates).value_or(std::filesystem::path("python3"));
+#endif
+}
+
+inline mornox::CommandSpec TestPythonCommand(std::string code, std::filesystem::path working_directory = {}) {
+    return {
+        .executable = TestPythonExecutable().string(),
+        .arguments = {"-c", std::move(code)},
+        .working_directory = std::move(working_directory),
+    };
+}
+
+inline mornox::CommandSpec TestStdoutCommand(std::string text, std::filesystem::path working_directory = {}) {
+    return TestPythonCommand("import sys; sys.stdout.buffer.write(" + PythonBytes(text) + ")", std::move(working_directory));
+}
+
+inline mornox::CommandSpec TestStdoutStderrCommand(
+    std::string stdout_text,
+    std::string stderr_text,
+    std::filesystem::path working_directory = {}) {
+    return TestPythonCommand(
+        "import sys; sys.stdout.buffer.write(" + PythonBytes(stdout_text) + "); sys.stderr.buffer.write(" + PythonBytes(stderr_text) + ")",
+        std::move(working_directory));
+}
+
+inline mornox::CommandSpec TestDelayedStdoutCommand(
+    std::chrono::milliseconds delay,
+    std::string text,
+    std::filesystem::path working_directory = {}) {
+    return TestPythonCommand(
+        "import sys, time; time.sleep(" + std::to_string(delay.count() / 1000.0) + "); sys.stdout.buffer.write(" + PythonBytes(text) + ")",
+        std::move(working_directory));
+}
+
+inline mornox::ExecutionRequest TestExecutionRequest(mornox::CommandSpec command, mornox::JobId job_id = 0) {
+    return {
+        .executable = std::move(command.executable),
+        .arguments = std::move(command.arguments),
+        .working_directory = std::move(command.working_directory),
+        .job_id = job_id,
+    };
+}
 
 inline void WaitForJobs(mornox::WorkspaceContext& context, mornox::JobKind kind) {
     for (const mornox::JobRecord& job : context.Jobs().Jobs()) {
@@ -180,11 +281,7 @@ public:
             .title = "Fake build",
             .steps = {{
                 .title = "Fake build",
-                .request = {
-                    .executable = "/bin/sh",
-                    .arguments = {"-c", "printf 'built\\n'"},
-                    .working_directory = context.CurrentWorkspace().Info().root_path,
-                },
+                .request = TestExecutionRequest(TestStdoutCommand("built\n", context.CurrentWorkspace().Info().root_path)),
                 .parse_diagnostics = false,
             }},
         };
@@ -211,11 +308,9 @@ public:
             .title = "Diagnostic build",
             .steps = {{
                 .title = "Diagnostic build",
-                .request = {
-                    .executable = "/bin/sh",
-                    .arguments = {"-c", "printf 'src/main.cpp:2:10: error: expected expression\\n'"},
-                    .working_directory = context.CurrentWorkspace().Info().root_path,
-                },
+                .request = TestExecutionRequest(TestStdoutCommand(
+                    "src/main.cpp:2:10: error: expected expression\n",
+                    context.CurrentWorkspace().Info().root_path)),
                 .parse_diagnostics = request.kind == mornox::BuildRequestKind::Build,
                 .diagnostic_base_directory = request.build_directory_override,
             }},

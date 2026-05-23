@@ -5,10 +5,11 @@
 #include <optional>
 #include <sstream>
 #include <thread>
-#include <vector>
 
 #include "mornox/core/value.h"
 #include "mornox/core/json_codec.h"
+
+#include "plugin/plugin_process_command.h"
 
 namespace mornox {
 namespace {
@@ -20,7 +21,7 @@ std::optional<std::size_t> ContentLength(const std::string& headers) {
         return std::nullopt;
     }
     const std::size_t value_start = start + key.size();
-    const std::size_t value_end = headers.find("\r\n", value_start);
+    const std::size_t value_end = headers.find_first_of("\r\n", value_start);
     try {
         return static_cast<std::size_t>(std::stoull(headers.substr(value_start, value_end - value_start)));
     } catch (...) {
@@ -28,29 +29,17 @@ std::optional<std::size_t> ContentLength(const std::string& headers) {
     }
 }
 
-CommandSpec ProcessCommandForManifest(const PluginManifest& manifest, const std::filesystem::path& workspace_root) {
-    const std::filesystem::path executable = manifest.extension.location / manifest.entry;
-    CommandSpec command{
-        .executable = executable.string(),
-        .arguments = {},
-        .working_directory = workspace_root,
-    };
-    if (executable.extension() != ".py") {
-        return command;
+std::optional<std::size_t> HeaderEndOffset(const std::string& response) {
+    if (const std::size_t value = response.find("\r\n\r\n"); value != std::string::npos) {
+        return value + 4;
     }
-    const std::vector<std::filesystem::path> candidates = {
-        "/opt/local/bin/python3.11",
-        "/opt/homebrew/bin/python3",
-        "/usr/local/bin/python3",
-    };
-    for (const std::filesystem::path& candidate : candidates) {
-        if (std::filesystem::exists(candidate)) {
-            command.executable = candidate.string();
-            command.arguments = {executable.string()};
-            return command;
-        }
+    if (const std::size_t value = response.find("\r\r\n\r\r\n"); value != std::string::npos) {
+        return value + 6;
     }
-    return command;
+    if (const std::size_t value = response.find("\n\n"); value != std::string::npos) {
+        return value + 2;
+    }
+    return std::nullopt;
 }
 
 }
@@ -64,7 +53,7 @@ bool PluginProcessHost::Start(const PluginManifest& manifest, const std::filesys
     }
 
     health_ = {};
-    const bool started = process_.Start(ProcessCommandForManifest(manifest, workspace_root), error_message);
+    const bool started = process_.Start(internal::ResolvePluginProcessCommand(manifest, workspace_root), error_message);
     health_.running = started;
     health_.responsive = started;
     if (!started && error_message != nullptr) {
@@ -122,28 +111,27 @@ std::optional<PluginRpcResponse> PluginProcessHost::SendRequest(std::string meth
 
     std::string response;
     std::optional<std::size_t> expected_body_size;
-    std::size_t body_start = std::string::npos;
+    std::optional<std::size_t> body_start;
     for (int attempt = 0; attempt < 300; ++attempt) {
         response += process_.ReadStdoutAvailable();
-        if (body_start == std::string::npos) {
-            body_start = response.find("\r\n\r\n");
-            if (body_start != std::string::npos) {
-                expected_body_size = ContentLength(response.substr(0, body_start));
-                body_start += 4;
+        if (!body_start) {
+            if (const auto header_end = HeaderEndOffset(response)) {
+                expected_body_size = ContentLength(response.substr(0, *header_end));
+                body_start = *header_end;
             }
         }
-        if (body_start != std::string::npos && expected_body_size && response.size() >= body_start + *expected_body_size) {
+        if (body_start && expected_body_size && response.size() >= *body_start + *expected_body_size) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    if (body_start == std::string::npos || !expected_body_size || response.size() < body_start + *expected_body_size) {
+    if (!body_start || !expected_body_size || response.size() < *body_start + *expected_body_size) {
         RecordFailure("Plugin RPC timed out");
         health_.running = process_.Running();
         health_.exit_code = process_.ExitCode();
         return std::nullopt;
     }
-    auto parsed = ParsePluginRpcResponseText(response.substr(body_start, *expected_body_size));
+    auto parsed = ParsePluginRpcResponseText(response.substr(*body_start, *expected_body_size));
     if (!parsed) {
         RecordFailure("Plugin RPC response was not valid JSON");
         health_.running = process_.Running();
@@ -158,7 +146,7 @@ std::optional<PluginRpcResponse> PluginProcessHost::SendRequest(std::string meth
 
 PluginProcessHealth PluginProcessHost::Health() {
     if (auto exit_code = process_.TryWait()) {
-        if (health_.running) {
+        if (health_.running || !health_.exit_code.has_value()) {
             ++health_.crash_count;
         }
         health_.running = false;

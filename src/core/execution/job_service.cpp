@@ -194,6 +194,7 @@ void JobService::SetCancellable(JobId id, bool cancellable) {
 }
 
 void JobService::SetCancelHandler(JobId id, std::function<void()> handler) {
+    const bool has_handler = handler != nullptr;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto job_it = jobs_.find(id);
@@ -206,7 +207,7 @@ void JobService::SetCancelHandler(JobId id, std::function<void()> handler) {
             cancel_handlers_.erase(id);
         }
     }
-    SetCancellable(id, handler != nullptr);
+    SetCancellable(id, has_handler);
 }
 
 void JobService::SetPayload(JobId id, Value payload) {

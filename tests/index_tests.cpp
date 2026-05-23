@@ -133,13 +133,15 @@ void TestCppCompilationDatabaseIndexProvider() {
     const auto root = MakeTempRoot();
     WriteFile(root / "src" / "main.cpp", "int main() { return 0; }\n");
     std::filesystem::create_directories(root / "include");
-    WriteFile(root / "build" / "compile_commands.json", std::string(R"([
-      {
-        "directory": ")" + root.string() + R"(",
-        "file": ")" + (root / "src" / "main.cpp").string() + R"(",
-        "arguments": ["c++", "-Iinclude", "-DMORNOX_TEST=1", "-c", "src/main.cpp"]
-      }
-    ])"));
+    WriteFile(
+        root / "build" / "compile_commands.json",
+        std::string("[\n")
+            + "  {\n"
+            + "    \"directory\": " + JsonPath(root) + ",\n"
+            + "    \"file\": " + JsonPath(root / "src" / "main.cpp") + ",\n"
+            + "    \"arguments\": [\"c++\", \"-Iinclude\", \"-DMORNOX_TEST=1\", \"-c\", \"src/main.cpp\"]\n"
+            + "  }\n"
+            + "]\n");
 
     mornox::VirtualFileSystem vfs;
     mornox::WorkspaceRuntime session(vfs, mornox::InlineJobDispatcher());

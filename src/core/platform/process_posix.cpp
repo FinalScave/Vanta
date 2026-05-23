@@ -1,18 +1,38 @@
 #include "mornox/platform/process.h"
 
+#if !defined(_WIN32)
+
 #include <array>
 #include <cerrno>
-#include <cstring>
 #include <fcntl.h>
+#include <memory>
 #include <signal.h>
-#include <stdexcept>
-#include <sys/select.h>
 #include <sys/wait.h>
-#include <utility>
 #include <unistd.h>
+#include <utility>
 
 namespace mornox {
+
+namespace internal {
+
+struct ChildProcessState {
+    int pid = -1;
+    int stdin_fd = -1;
+    int stdout_fd = -1;
+    int stderr_fd = -1;
+    std::optional<int> exit_code;
+};
+
+}
+
 namespace {
+
+internal::ChildProcessState& EnsureState(std::unique_ptr<internal::ChildProcessState>& state) {
+    if (state == nullptr) {
+        state = std::make_unique<internal::ChildProcessState>();
+    }
+    return *state;
+}
 
 std::vector<char*> BuildArgv(const CommandSpec& spec) {
     std::vector<char*> argv;
@@ -64,107 +84,15 @@ std::string ReadAvailable(int fd) {
 
 }
 
-CommandResult RunCommand(const CommandSpec& spec, CommandCallbacks callbacks) {
-    int stdout_pipe[2] = {-1, -1};
-    int stderr_pipe[2] = {-1, -1};
-    if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0) {
-        throw std::runtime_error("Failed to create command pipes");
-    }
+ChildProcess::ChildProcess() = default;
 
-    const pid_t pid = fork();
-    if (pid < 0) {
-        throw std::runtime_error("Failed to fork process");
-    }
-
-    if (pid == 0) {
-        close(stdout_pipe[0]);
-        close(stderr_pipe[0]);
-        dup2(stdout_pipe[1], STDOUT_FILENO);
-        dup2(stderr_pipe[1], STDERR_FILENO);
-        close(stdout_pipe[1]);
-        close(stderr_pipe[1]);
-
-        if (!spec.working_directory.empty()) {
-            chdir(spec.working_directory.c_str());
-        }
-
-        std::vector<char*> argv = BuildArgv(spec);
-        execvp(spec.executable.c_str(), argv.data());
-        _exit(127);
-    }
-
-    close(stdout_pipe[1]);
-    close(stderr_pipe[1]);
-    SetNonBlocking(stdout_pipe[0]);
-    SetNonBlocking(stderr_pipe[0]);
-
-    int status = 0;
-    bool exited = false;
-    std::string stdout_text;
-    std::string stderr_text;
-
-    auto DrainOutput = [&] {
-        std::string stdout_chunk = ReadAvailable(stdout_pipe[0]);
-        if (!stdout_chunk.empty()) {
-            if (callbacks.on_stdout) {
-                callbacks.on_stdout(stdout_chunk);
-            }
-            stdout_text += std::move(stdout_chunk);
-        }
-        std::string stderr_chunk = ReadAvailable(stderr_pipe[0]);
-        if (!stderr_chunk.empty()) {
-            if (callbacks.on_stderr) {
-                callbacks.on_stderr(stderr_chunk);
-            }
-            stderr_text += std::move(stderr_chunk);
-        }
-    };
-
-    while (!exited) {
-        DrainOutput();
-
-        const pid_t waited = waitpid(pid, &status, WNOHANG);
-        if (waited == pid) {
-            exited = true;
-        } else if (waited < 0 && errno != EINTR) {
-            exited = true;
-        } else {
-            usleep(10000);
-        }
-    }
-    DrainOutput();
-
-    CommandResult result;
-    result.standard_output = std::move(stdout_text);
-    result.standard_error = std::move(stderr_text);
-    close(stdout_pipe[0]);
-    close(stderr_pipe[0]);
-
-    if (WIFEXITED(status)) {
-        result.exit_code = WEXITSTATUS(status);
-    } else if (WIFSIGNALED(status)) {
-        result.exit_code = 128 + WTERMSIG(status);
-    }
-    return result;
-}
-
-ChildProcess::ChildProcess(ChildProcess&& other) noexcept {
-    *this = std::move(other);
-}
+ChildProcess::ChildProcess(ChildProcess&& other) noexcept
+    : state_(std::move(other.state_)) {}
 
 ChildProcess& ChildProcess::operator=(ChildProcess&& other) noexcept {
     if (this != &other) {
         Terminate();
-        pid_ = other.pid_;
-        stdin_fd_ = other.stdin_fd_;
-        stdout_fd_ = other.stdout_fd_;
-        stderr_fd_ = other.stderr_fd_;
-        exit_code_ = other.exit_code_;
-        other.pid_ = -1;
-        other.stdin_fd_ = -1;
-        other.stdout_fd_ = -1;
-        other.stderr_fd_ = -1;
-        other.exit_code_.reset();
+        state_ = std::move(other.state_);
     }
     return *this;
 }
@@ -175,7 +103,8 @@ ChildProcess::~ChildProcess() {
 
 bool ChildProcess::Start(const CommandSpec& spec, std::string* error_message) {
     Terminate();
-    exit_code_.reset();
+    internal::ChildProcessState& state = EnsureState(state_);
+    state.exit_code.reset();
 
     int stdin_pipe[2] = {-1, -1};
     int stdout_pipe[2] = {-1, -1};
@@ -222,74 +151,74 @@ bool ChildProcess::Start(const CommandSpec& spec, std::string* error_message) {
     close(stdin_pipe[0]);
     close(stdout_pipe[1]);
     close(stderr_pipe[1]);
-    pid_ = static_cast<int>(pid);
-    stdin_fd_ = stdin_pipe[1];
-    stdout_fd_ = stdout_pipe[0];
-    stderr_fd_ = stderr_pipe[0];
-    SetNonBlocking(stdout_fd_);
-    SetNonBlocking(stderr_fd_);
+    state.pid = static_cast<int>(pid);
+    state.stdin_fd = stdin_pipe[1];
+    state.stdout_fd = stdout_pipe[0];
+    state.stderr_fd = stderr_pipe[0];
+    SetNonBlocking(state.stdout_fd);
+    SetNonBlocking(state.stderr_fd);
     return true;
 }
 
 bool ChildProcess::Running() const {
-    if (pid_ < 0) {
+    if (state_ == nullptr || state_->pid < 0) {
         return false;
     }
-    return kill(pid_, 0) == 0 || errno == EPERM;
+    return kill(state_->pid, 0) == 0 || errno == EPERM;
 }
 
 std::optional<int> ChildProcess::TryWait() {
-    if (pid_ < 0) {
-        return exit_code_;
+    if (state_ == nullptr || state_->pid < 0) {
+        return state_ == nullptr ? std::nullopt : state_->exit_code;
     }
     int status = 0;
-    const pid_t result = waitpid(pid_, &status, WNOHANG);
+    const pid_t result = waitpid(state_->pid, &status, WNOHANG);
     if (result == 0) {
         return std::nullopt;
     }
-    if (result == pid_) {
+    if (result == state_->pid) {
         RememberExitStatus(status);
-        pid_ = -1;
-        return exit_code_;
+        state_->pid = -1;
+        return state_->exit_code;
     }
     if (result < 0 && errno == ECHILD) {
-        pid_ = -1;
-        return exit_code_;
+        state_->pid = -1;
+        return state_->exit_code;
     }
     return std::nullopt;
 }
 
 int ChildProcess::Wait() {
-    if (pid_ < 0) {
-        return exit_code_.value_or(-1);
+    if (state_ == nullptr || state_->pid < 0) {
+        return state_ == nullptr ? -1 : state_->exit_code.value_or(-1);
     }
     int status = 0;
     while (true) {
-        const pid_t result = waitpid(pid_, &status, 0);
-        if (result == pid_) {
+        const pid_t result = waitpid(state_->pid, &status, 0);
+        if (result == state_->pid) {
             RememberExitStatus(status);
-            pid_ = -1;
-            return exit_code_.value_or(-1);
+            state_->pid = -1;
+            return state_->exit_code.value_or(-1);
         }
         if (result < 0 && errno == EINTR) {
             continue;
         }
         if (result < 0 && errno == ECHILD) {
-            pid_ = -1;
-            return exit_code_.value_or(-1);
+            state_->pid = -1;
+            return state_->exit_code.value_or(-1);
         }
         return -1;
     }
 }
 
 bool ChildProcess::WriteStdin(const std::string& text) {
-    if (stdin_fd_ < 0) {
+    if (state_ == nullptr || state_->stdin_fd < 0) {
         return false;
     }
     const char* data = text.data();
     std::size_t remaining = text.size();
     while (remaining > 0) {
-        const ssize_t count = write(stdin_fd_, data, remaining);
+        const ssize_t count = write(state_->stdin_fd, data, remaining);
         if (count > 0) {
             data += count;
             remaining -= static_cast<std::size_t>(count);
@@ -304,54 +233,63 @@ bool ChildProcess::WriteStdin(const std::string& text) {
 }
 
 std::string ChildProcess::ReadStdoutAvailable() {
-    return ReadAvailable(stdout_fd_);
+    return state_ == nullptr ? std::string() : ReadAvailable(state_->stdout_fd);
 }
 
 std::string ChildProcess::ReadStderrAvailable() {
-    return ReadAvailable(stderr_fd_);
+    return state_ == nullptr ? std::string() : ReadAvailable(state_->stderr_fd);
 }
 
 void ChildProcess::Terminate() {
-    if (pid_ >= 0) {
-        kill(pid_, SIGTERM);
+    if (state_ == nullptr) {
+        return;
+    }
+    if (state_->pid >= 0) {
+        kill(state_->pid, SIGTERM);
         int status = 0;
-        if (waitpid(pid_, &status, 0) == pid_) {
+        if (waitpid(state_->pid, &status, 0) == state_->pid) {
             RememberExitStatus(status);
         } else {
-            exit_code_ = 143;
+            state_->exit_code = 143;
         }
-        pid_ = -1;
+        state_->pid = -1;
     }
     ClosePipes();
 }
 
 std::optional<int> ChildProcess::ExitCode() const {
-    return exit_code_;
+    return state_ == nullptr ? std::nullopt : state_->exit_code;
 }
 
 void ChildProcess::ClosePipes() {
-    if (stdin_fd_ >= 0) {
-        close(stdin_fd_);
-        stdin_fd_ = -1;
+    if (state_ == nullptr) {
+        return;
     }
-    if (stdout_fd_ >= 0) {
-        close(stdout_fd_);
-        stdout_fd_ = -1;
+    if (state_->stdin_fd >= 0) {
+        close(state_->stdin_fd);
+        state_->stdin_fd = -1;
     }
-    if (stderr_fd_ >= 0) {
-        close(stderr_fd_);
-        stderr_fd_ = -1;
+    if (state_->stdout_fd >= 0) {
+        close(state_->stdout_fd);
+        state_->stdout_fd = -1;
+    }
+    if (state_->stderr_fd >= 0) {
+        close(state_->stderr_fd);
+        state_->stderr_fd = -1;
     }
 }
 
 void ChildProcess::RememberExitStatus(int status) {
+    internal::ChildProcessState& state = EnsureState(state_);
     if (WIFEXITED(status)) {
-        exit_code_ = WEXITSTATUS(status);
+        state.exit_code = WEXITSTATUS(status);
     } else if (WIFSIGNALED(status)) {
-        exit_code_ = 128 + WTERMSIG(status);
+        state.exit_code = 128 + WTERMSIG(status);
     } else {
-        exit_code_ = -1;
+        state.exit_code = -1;
     }
 }
 
 }
+
+#endif

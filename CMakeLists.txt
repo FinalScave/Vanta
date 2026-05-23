@@ -32,6 +32,10 @@ function(mornox_configure_core_target target_name)
 
     target_compile_features(${target_name} PUBLIC cxx_std_20)
     target_link_libraries(${target_name} PUBLIC Mornox3p::NlohmannJson)
+    target_compile_options(${target_name} PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
+        $<$<CXX_COMPILER_ID:MSVC>:/FS>
+    )
 
     if(APPLE)
         target_link_libraries(${target_name} PUBLIC "-framework CoreServices")
@@ -83,6 +87,10 @@ target_include_directories(mornox_ide
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ide
 )
 target_compile_features(mornox_ide PUBLIC cxx_std_20)
+target_compile_options(mornox_ide PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
+    $<$<CXX_COMPILER_ID:MSVC>:/FS>
+)
 
 file(GLOB_RECURSE MORNOX_CLI_SOURCES CONFIGURE_DEPENDS
     src/cli/*.cpp
@@ -94,6 +102,10 @@ target_include_directories(mornox_cli PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     ${MORNOX_BUILTIN_INCLUDE_DIRS}
+)
+target_compile_options(mornox_cli PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
+    $<$<CXX_COMPILER_ID:MSVC>:/FS>
 )
 set_target_properties(mornox_cli PROPERTIES OUTPUT_NAME mornox)
 add_executable(mornox ALIAS mornox_cli)
@@ -110,6 +122,10 @@ if(BUILD_MORNOX_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ide
         ${MORNOX_BUILTIN_INCLUDE_DIRS}
+    )
+    target_compile_options(mornox_tests PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
+        $<$<CXX_COMPILER_ID:MSVC>:/FS>
     )
     add_test(NAME mornox_tests COMMAND mornox_tests)
 endif()

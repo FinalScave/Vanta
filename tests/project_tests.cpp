@@ -14,13 +14,15 @@ void TestProjectManager() {
       "runtime": {"kind": "core", "entry": "builtin:cmake"}
     })");
     std::filesystem::create_directories(root / "include");
-    WriteFile(root / "build" / "compile_commands.json", std::string(R"([
-      {
-        "directory": ")" + root.string() + R"(",
-        "file": ")" + (root / "src" / "main.cpp").string() + R"(",
-        "arguments": ["c++", "-Iinclude", "-DMORNOX_TEST=1", "-c", "src/main.cpp"]
-      }
-    ])"));
+    WriteFile(
+        root / "build" / "compile_commands.json",
+        std::string("[\n")
+            + "  {\n"
+            + "    \"directory\": " + JsonPath(root) + ",\n"
+            + "    \"file\": " + JsonPath(root / "src" / "main.cpp") + ",\n"
+            + "    \"arguments\": [\"c++\", \"-Iinclude\", \"-DMORNOX_TEST=1\", \"-c\", \"src/main.cpp\"]\n"
+            + "  }\n"
+            + "]\n");
 
     mornox::VirtualFileSystem vfs;
     mornox::WorkspaceRuntime session(vfs, mornox::InlineJobDispatcher());
@@ -144,10 +146,11 @@ void TestRunConfigurationsAndSingleFileProject() {
     REQUIRE(std::any_of(fields.begin(), fields.end(), [](const mornox::RunConfigurationField& field) {
         return field.id == "executable" && field.kind == "string" && field.default_value.IsString();
     }));
-    REQUIRE(provider->SetFieldValue(*configuration.data, "executable", mornox::Value("/bin/echo")));
-    REQUIRE(provider->SetFieldValue(*configuration.data, "arguments", mornox::Value::ArrayValue({mornox::Value("ok")})));
-    REQUIRE(provider->SetFieldValue(*configuration.data, "workingDirectory", mornox::Value(root.string())));
-    REQUIRE(provider->GetFieldValue(*configuration.data, "executable").AsString() == "/bin/echo");
+    const mornox::CommandSpec echo_command = TestStdoutCommand("ok", root);
+    REQUIRE(provider->SetFieldValue(*configuration.data, "executable", mornox::Value(echo_command.executable)));
+    REQUIRE(provider->SetFieldValue(*configuration.data, "arguments", StringArrayValue(echo_command.arguments)));
+    REQUIRE(provider->SetFieldValue(*configuration.data, "workingDirectory", mornox::Value(echo_command.working_directory.string())));
+    REQUIRE(provider->GetFieldValue(*configuration.data, "executable").AsString() == echo_command.executable);
     project_runs->AddConfiguration(std::move(configuration));
     REQUIRE(project_runs->Configuration("custom.echo").has_value());
     const mornox::RunResult result = session.Context().RunConfigurations().RunSaved(session.Context(), "custom.echo");

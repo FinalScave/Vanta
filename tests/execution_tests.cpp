@@ -54,10 +54,7 @@ void TestJobTermination() {
 void TestProcessRealtimeCallbacks() {
     int stdout_chunks = 0;
     int stderr_chunks = 0;
-    const mornox::CommandResult result = mornox::RunCommand({
-        .executable = "/bin/sh",
-        .arguments = {"-c", "printf out; printf err >&2"},
-    }, {
+    const mornox::CommandResult result = mornox::RunCommand(TestStdoutStderrCommand("out", "err"), {
         .on_stdout = [&](const std::string& chunk) {
             if (!chunk.empty()) {
                 ++stdout_chunks;
@@ -143,11 +140,7 @@ void TestExecutionHandle() {
     const auto targets = session.Context().Execution().Targets(session.Context());
     REQUIRE(!targets.empty());
     int events = 0;
-    mornox::ExecutionHandle handle = session.Context().Execution().Start(session.Context(), {
-        .executable = "/bin/sh",
-        .arguments = {"-c", "printf ok"},
-        .working_directory = root,
-    }, targets.front(), [&](const mornox::ExecutionEvent&) {
+    mornox::ExecutionHandle handle = session.Context().Execution().Start(session.Context(), TestExecutionRequest(TestStdoutCommand("ok", root)), targets.front(), [&](const mornox::ExecutionEvent&) {
         ++events;
     });
     REQUIRE(handle.Valid());
@@ -158,12 +151,7 @@ void TestExecutionHandle() {
     REQUIRE(handle.Status() == mornox::ExecutionStatus::Succeeded);
 
     const mornox::JobId job_id = session.Context().Jobs().Start(mornox::JobKind::Run, "Tracked run");
-    mornox::ExecutionHandle tracked = session.Context().Execution().Start(session.Context(), {
-        .executable = "/bin/sh",
-        .arguments = {"-c", "printf tracked"},
-        .working_directory = root,
-        .job_id = job_id,
-    }, targets.front(), [&](const mornox::ExecutionEvent& event) {
+    mornox::ExecutionHandle tracked = session.Context().Execution().Start(session.Context(), TestExecutionRequest(TestStdoutCommand("tracked", root), job_id), targets.front(), [&](const mornox::ExecutionEvent& event) {
         mornox::ApplyExecutionEventToJob(session.Context().Jobs(), event);
     });
     REQUIRE(tracked.Wait().exit_code == 0);
@@ -173,12 +161,7 @@ void TestExecutionHandle() {
     REQUIRE(job->output == "tracked");
 
     const mornox::JobId cancel_job_id = session.Context().Jobs().Start(mornox::JobKind::Run, "Cancelable run");
-    mornox::ExecutionHandle tracked_cancel = session.Context().Execution().Start(session.Context(), {
-        .executable = "/bin/sh",
-        .arguments = {"-c", "sleep 1; printf late"},
-        .working_directory = root,
-        .job_id = cancel_job_id,
-    }, targets.front(), [&](const mornox::ExecutionEvent& event) {
+    mornox::ExecutionHandle tracked_cancel = session.Context().Execution().Start(session.Context(), TestExecutionRequest(TestDelayedStdoutCommand(std::chrono::milliseconds(1000), "late", root), cancel_job_id), targets.front(), [&](const mornox::ExecutionEvent& event) {
         mornox::ApplyExecutionEventToJob(session.Context().Jobs(), event);
     });
     REQUIRE(tracked_cancel.Valid());
@@ -193,11 +176,10 @@ void TestExecutionHandle() {
     REQUIRE(cancelled_job.has_value());
     REQUIRE(cancelled_job->status == mornox::JobStatus::Cancelled);
 
-    mornox::ExecutionHandle cancelled = session.Context().Execution().Start(session.Context(), {
-        .executable = "/bin/sh",
-        .arguments = {"-c", "sleep 1; printf late"},
-        .working_directory = root,
-    }, targets.front());
+    mornox::ExecutionHandle cancelled = session.Context().Execution().Start(
+        session.Context(),
+        TestExecutionRequest(TestDelayedStdoutCommand(std::chrono::milliseconds(1000), "late", root)),
+        targets.front());
     REQUIRE(cancelled.Valid());
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     cancelled.Cancel();

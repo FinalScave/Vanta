@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "mornox/execution/run_configuration.h"
+#include "mornox/platform/executable.h"
 #include "mornox/project/project.h"
 #include "mornox/project/project_template.h"
 #include "mornox/workspace/workspace_context.h"
@@ -73,6 +74,22 @@ ValidationResult Missing(const std::string& message) {
         .ok = false,
         .messages = {message},
     };
+}
+
+std::filesystem::path PythonExecutable() {
+#if defined(_WIN32)
+    const std::vector<std::string> candidates = {"python", "py"};
+    return FindFirstExecutableOnPath(candidates).value_or(std::filesystem::path("python"));
+#else
+    const std::vector<std::string> candidates = {
+        "/opt/local/bin/python3.11",
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+        "python3",
+        "python",
+    };
+    return FindFirstExecutableOnPath(candidates).value_or(std::filesystem::path("python3"));
+#endif
 }
 
 class PythonScriptRunConfigurationProvider final : public RunConfigurationProvider {
@@ -248,8 +265,9 @@ public:
         for (const std::string& argument : data->arguments) {
             arguments.push_back(argument);
         }
+        const std::filesystem::path python = PythonExecutable();
         const ExecutionResult execution = context.workspace.Execution().Execute(context.workspace, {
-            .executable = "python3",
+            .executable = python.string(),
             .arguments = arguments,
             .working_directory = working_directory,
             .job_id = context.job_id,

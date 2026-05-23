@@ -2,11 +2,16 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace mornox {
+
+namespace internal {
+struct ChildProcessState;
+}
 
 struct CommandResult {
     int exit_code = -1;
@@ -29,7 +34,7 @@ CommandResult RunCommand(const CommandSpec& spec, CommandCallbacks callbacks = {
 
 class ChildProcess {
 public:
-    ChildProcess() = default;
+    ChildProcess();
     ChildProcess(const ChildProcess&) = delete;
     ChildProcess& operator=(const ChildProcess&) = delete;
     ChildProcess(ChildProcess&& other) noexcept;
@@ -50,11 +55,7 @@ private:
     void ClosePipes();
     void RememberExitStatus(int status);
 
-    int pid_ = -1;
-    int stdin_fd_ = -1;
-    int stdout_fd_ = -1;
-    int stderr_fd_ = -1;
-    std::optional<int> exit_code_;
+    std::unique_ptr<internal::ChildProcessState> state_;
 };
 
 }
