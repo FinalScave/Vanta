@@ -1,0 +1,34 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file alias="bot.svg">icons/bot.svg</file>
+    <file alias="box.svg">icons/box.svg</file>
+    <file alias="chevron-down.svg">icons/chevron-down.svg</file>
+    <file alias="circle-check.svg">icons/circle-check.svg</file>
+    <file alias="circle-dot.svg">icons/circle-dot.svg</file>
+    <file alias="circle-x.svg">icons/circle-x.svg</file>
+    <file alias="code.svg">icons/code.svg</file>
+    <file alias="database.svg">icons/database.svg</file>
+    <file alias="eye.svg">icons/eye.svg</file>
+    <file alias="file.svg">icons/file.svg</file>
+    <file alias="file-code.svg">icons/file-code.svg</file>
+    <file alias="flask-conical.svg">icons/flask-conical.svg</file>
+    <file alias="folder.svg">icons/folder.svg</file>
+    <file alias="git-branch.svg">icons/git-branch.svg</file>
+    <file alias="git-pull-request.svg">icons/git-pull-request.svg</file>
+    <file alias="list-tree.svg">icons/list-tree.svg</file>
+    <file alias="lock-keyhole.svg">icons/lock-keyhole.svg</file>
+    <file alias="minus.svg">icons/minus.svg</file>
+    <file alias="network.svg">icons/network.svg</file>
+    <file alias="package.svg">icons/package.svg</file>
+    <file alias="play.svg">icons/play.svg</file>
+    <file alias="route.svg">icons/route.svg</file>
+    <file alias="search.svg">icons/search.svg</file>
+    <file alias="settings-2.svg">icons/settings-2.svg</file>
+    <file alias="square.svg">icons/square.svg</file>
+    <file alias="target.svg">icons/target.svg</file>
+    <file alias="terminal.svg">icons/terminal.svg</file>
+    <file alias="test-tube.svg">icons/test-tube.svg</file>
+    <file alias="wrench.svg">icons/wrench.svg</file>
+    <file alias="x.svg">icons/x.svg</file>
+  </qresource>
+</RCC>

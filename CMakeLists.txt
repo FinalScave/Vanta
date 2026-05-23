@@ -74,23 +74,29 @@ endif()
 file(GLOB_RECURSE MORNOX_IDE_SOURCES CONFIGURE_DEPENDS
     src/ide/*.cpp
 )
-
-add_library(mornox_ide ${MORNOX_IDE_SOURCES})
-
-target_link_libraries(mornox_ide PUBLIC mornox_core)
-target_include_directories(mornox_ide
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/core
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/ide
+file(GLOB_RECURSE MORNOX_IDE_RESOURCES CONFIGURE_DEPENDS
+    src/ide/*.qrc
 )
-target_compile_features(mornox_ide PUBLIC cxx_std_20)
-target_compile_options(mornox_ide PRIVATE
-    $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
-    $<$<CXX_COMPILER_ID:MSVC>:/FS>
-)
+
+if(BUILD_MORNOX_IDE)
+    find_package(Qt6 REQUIRED COMPONENTS Svg Widgets)
+
+    add_executable(mornox_ide ${MORNOX_IDE_SOURCES} ${MORNOX_IDE_RESOURCES})
+    set_target_properties(mornox_ide PROPERTIES AUTORCC ON)
+    target_link_libraries(mornox_ide PRIVATE mornox_core Qt6::Svg Qt6::Widgets)
+    target_include_directories(mornox_ide
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/ide
+    )
+    target_compile_features(mornox_ide PRIVATE cxx_std_20)
+    target_compile_options(mornox_ide PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/utf-8>
+        $<$<CXX_COMPILER_ID:MSVC>:/FS>
+    )
+endif()
 
 file(GLOB_RECURSE MORNOX_CLI_SOURCES CONFIGURE_DEPENDS
     src/cli/*.cpp
@@ -115,8 +121,15 @@ if(BUILD_MORNOX_TESTS)
     file(GLOB_RECURSE MORNOX_TEST_SOURCES CONFIGURE_DEPENDS
         tests/*.cpp
     )
-    add_executable(mornox_tests ${MORNOX_TEST_SOURCES})
-    target_link_libraries(mornox_tests PRIVATE mornox_ide Mornox3p::Catch2)
+    file(GLOB_RECURSE MORNOX_IDE_TEST_SOURCES CONFIGURE_DEPENDS
+        src/ide/ui/*.cpp
+    )
+    list(APPEND MORNOX_IDE_TEST_SOURCES
+        src/ide/ui_service.cpp
+    )
+
+    add_executable(mornox_tests ${MORNOX_TEST_SOURCES} ${MORNOX_IDE_TEST_SOURCES})
+    target_link_libraries(mornox_tests PRIVATE mornox_core Mornox3p::Catch2)
     target_include_directories(mornox_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core

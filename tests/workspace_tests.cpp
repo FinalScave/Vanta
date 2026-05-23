@@ -1,7 +1,7 @@
 #include "test_support.h"
 
-#include "mornox/ide/ide_application.h"
 #include "mornox/ide/ui_service.h"
+#include "ui_service_impl.h"
 
 namespace mornox::tests {
 
@@ -271,11 +271,14 @@ void TestUiServiceInjectionAndProviders() {
     const auto root = MakeTempRoot();
     WriteFile(root / "main.cpp", "int main() { return 0; }\n");
 
-    mornox::IdeApplication app;
+    mornox::VirtualFileSystem vfs;
+    mornox::WorkspaceRuntime session(vfs, mornox::InlineJobDispatcher());
     std::string error;
-    REQUIRE(app.OpenWorkspace(root, {}, &error));
-    auto* ui = app.Context().GetService<mornox::UiService>();
-    REQUIRE(ui == &app.Ui());
+    REQUIRE(session.Open(root, &error));
+    mornox::internal::UiServiceImpl ui_service;
+    session.Context().RegisterService(mornox::UiService::kServiceId, &ui_service);
+    auto* ui = session.Context().GetService<mornox::UiService>();
+    REQUIRE(ui == &ui_service);
 
     PanelProvider panels;
     ActionProvider actions;
@@ -288,14 +291,15 @@ void TestUiServiceInjectionAndProviders() {
     REQUIRE(action_registration.Registered());
     REQUIRE(settings_registration.Registered());
     REQUIRE(ui->PanelProviderIds().size() == 1);
-    REQUIRE(ui->Panels(app.Context()).size() == 2);
-    REQUIRE(ui->Panels(app.Context())[0].id == "sample.agent");
-    REQUIRE(ui->Actions(app.Context()).size() == 1);
-    REQUIRE(ui->SettingsPages(app.Context()).size() == 1);
+    REQUIRE(ui->Panels(session.Context()).size() == 2);
+    REQUIRE(ui->Panels(session.Context())[0].id == "sample.agent");
+    REQUIRE(ui->Actions(session.Context()).size() == 1);
+    REQUIRE(ui->SettingsPages(session.Context()).size() == 1);
 
     panel_registration.Unregister();
-    REQUIRE(ui->Panels(app.Context()).empty());
-    app.Shutdown();
+    REQUIRE(ui->Panels(session.Context()).empty());
+    session.Context().UnregisterService(mornox::UiService::kServiceId, &ui_service);
+    session.Close();
 }
 
 }
